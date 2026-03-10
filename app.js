@@ -12,6 +12,14 @@ const HISTORY_STORAGE_KEY = "deckforge_history";
 const STORAGE_API_BASE = "/api/storage";
 const MAX_HISTORY_ITEMS = 30;
 const MAX_CARD_LEVEL = 16;
+const DECK_EXPLORER_FAVORITES_KEY = "deckforge_explorer_favorites";
+const DECK_EXPLORER_API = "/api/decks/explorer";
+const STATUS_API = "/api/status";
+const CHATBOT_PING_API = "/api/status/chatbot-ping";
+const COACH_CHAT_API = "/api/chat/coach";
+const CHAT_SESSION_STORAGE_KEY = "deckforge_chat_session_id";
+const STATUS_REFRESH_INTERVAL_MS = 30000;
+const APP_BUILD_LABEL = "local-dev";
 
 const ROLE_FILTERS = [
   { id: "all", label: "All" },
@@ -253,7 +261,39 @@ const elements = {
   statusMessage: document.getElementById("statusMessage"),
   suggestionList: document.getElementById("suggestionList"),
   catalogCount: document.getElementById("catalogCount"),
-  catalogGrid: document.getElementById("catalogGrid")
+  catalogGrid: document.getElementById("catalogGrid"),
+  catalogInsights: document.getElementById("catalogInsights"),
+  catalogInsightsStatus: document.getElementById("catalogInsightsStatus"),
+  catalogQuickFilters: document.getElementById("catalogQuickFilters"),
+  collectionAvgLevel: document.getElementById("collectionAvgLevel"),
+  collectionLowLevelList: document.getElementById("collectionLowLevelList"),
+  collectionProgressEvo: document.getElementById("collectionProgressEvo"),
+  collectionProgressHero: document.getElementById("collectionProgressHero"),
+  collectionProgressOwned: document.getElementById("collectionProgressOwned"),
+  insightSafeDeckBtn: document.getElementById("insightSafeDeckBtn"),
+  insightUpgradeBtn: document.getElementById("insightUpgradeBtn"),
+  chatSuggestions: document.getElementById("chatSuggestions"),
+  deckDetailContent: document.getElementById("deckDetailContent"),
+  deckDetailModal: document.getElementById("deckDetailModal"),
+  deckExplorerArchetypeSelect: document.getElementById("deckExplorerArchetypeSelect"),
+  deckExplorerFavoritesToggle: document.getElementById("deckExplorerFavoritesToggle"),
+  deckExplorerGrid: document.getElementById("deckExplorerGrid"),
+  deckExplorerMeta: document.getElementById("deckExplorerMeta"),
+  deckExplorerSearchInput: document.getElementById("deckExplorerSearchInput"),
+  deckExplorerSourceSelect: document.getElementById("deckExplorerSourceSelect"),
+  deckExplorerTagSelect: document.getElementById("deckExplorerTagSelect"),
+  deckModalCloseBtn: document.getElementById("deckModalCloseBtn"),
+  refreshDeckExplorerBtn: document.getElementById("refreshDeckExplorerBtn"),
+  refreshStatusBtn: document.getElementById("refreshStatusBtn"),
+  statusActivityList: document.getElementById("statusActivityList"),
+  statusApiState: document.getElementById("statusApiState"),
+  statusApiTime: document.getElementById("statusApiTime"),
+  statusBuildLabel: document.getElementById("statusBuildLabel"),
+  statusChatState: document.getElementById("statusChatState"),
+  statusChatTime: document.getElementById("statusChatTime"),
+  statusDeckState: document.getElementById("statusDeckState"),
+  statusDeckTime: document.getElementById("statusDeckTime"),
+  syncDeckDbBtn: document.getElementById("syncDeckDbBtn")
 };
 
 const state = {
@@ -280,7 +320,28 @@ const state = {
   playstylePreference: "no_preference",
   savedProfiles: [],
   search: "",
-  statusTimer: null
+  catalogQuickFilter: "all",
+  statusTimer: null,
+  statusPollTimer: null,
+  statusSnapshot: null,
+  deckExplorer: {
+    decks: [],
+    sections: { topPlayerDecks: [], popularDecks: [], metaDecks: [] },
+    meta: null,
+    search: "",
+    archetype: "all",
+    sourceType: "all",
+    tag: "all",
+    favoritesOnly: false
+  },
+  deckExplorerFavorites: new Set(),
+  chatContext: {
+    lastIntent: "none",
+    lastMessageAt: "",
+    lastTrophyHint: 0,
+    sessionId: "",
+    suggestions: ["build my best deck", "analyze my deck", "what should i upgrade first?", "give me safer version"]
+  }
 };
 
 function normalizeName(value) {
@@ -570,6 +631,11 @@ function loadLocalCoachState() {
   const history = rawHistory ? safeJsonParse(rawHistory, []) : [];
   if (Array.isArray(history)) {
     state.historyEntries = history.slice(0, MAX_HISTORY_ITEMS);
+  }
+
+  const storedSessionId = String(localStorage.getItem(CHAT_SESSION_STORAGE_KEY) || "").trim();
+  if (storedSessionId) {
+    state.chatContext.sessionId = storedSessionId;
   }
 }
 
@@ -1275,6 +1341,7 @@ function renderCoachDeckCards(options = state.coachRecommendations) {
     elements.coachDeckCards.innerHTML = '<p class="meta">Run a one-tap mode or ask the coach to build decks.</p>';
     updateCoachResultsMeta("No recommendations yet");
     renderComparisonSelectors();
+    renderChatSuggestions();
     refreshInteractiveMotion();
     return;
   }
@@ -1436,6 +1503,7 @@ ${upgradeBucketsText(buckets)}`);
   state.lastDeckBuildText = response;
   setAnalysisOutput(response);
   renderCoachDeckCards(state.coachRecommendations);
+  renderCollectionInsights();
 
   const main = state.coachRecommendations[0];
   if (main?.cards?.length) {
@@ -1481,10 +1549,123 @@ function matchesFilter(card) {
   return card.roles.includes(state.activeFilter);
 }
 
+function averageOwnedCollectionLevel() {
+  if (!state.collectionLoaded || !state.ownedLevels.size) {
+    return 0;
+  }
+
+  let sum = 0;
+  for (const level of state.ownedLevels.values()) {
+    sum += Number(level || 0);
+  }
+  return sum / state.ownedLevels.size;
+}
+
+function preferredCardsForInsights() {
+  const current = deckCards();
+  if (isCompleteDeck(current)) {
+    return {
+      label: "Current deck",
+      cards: current
+    };
+  }
+
+  const main = state.coachRecommendations[0];
+  if (main?.cards && isCompleteDeck(main.cards)) {
+    return {
+      label: main.name || "Best main deck",
+      cards: main.cards
+    };
+  }
+
+  return {
+    label: "",
+    cards: current
+  };
+}
+
+function catalogCoreSlugSet() {
+  const slugs = new Set(deckCards().map((card) => card.slug));
+  const main = state.coachRecommendations[0];
+  if (main?.cards?.length) {
+    for (const card of main.cards) {
+      slugs.add(card.slug);
+    }
+  }
+  return slugs;
+}
+
+function catalogFilterLabel(mode) {
+  const labels = {
+    all: "All",
+    underleveled: "Underleveled",
+    deck_core: "Deck-Core",
+    highest_level: "Highest Level",
+    missing_evo: "Missing Evolutions"
+  };
+  return labels[mode] || "All";
+}
+
+function applyCatalogQuickFilter(cards) {
+  const mode = state.catalogQuickFilter;
+
+  if (mode === "all") {
+    return cards;
+  }
+
+  if (mode === "highest_level") {
+    return [...cards].sort((a, b) => cardLevel(b) - cardLevel(a) || a.name.localeCompare(b.name));
+  }
+
+  if (mode === "underleveled") {
+    if (!state.collectionLoaded) {
+      return [];
+    }
+
+    const avg = averageOwnedCollectionLevel();
+    const threshold = Math.max(1, Math.floor(avg - 1));
+
+    return cards
+      .filter((card) => cardOwned(card) && cardLevel(card) > 0 && cardLevel(card) <= threshold)
+      .sort((a, b) => cardLevel(a) - cardLevel(b) || a.name.localeCompare(b.name));
+  }
+
+  if (mode === "deck_core") {
+    const coreSlugs = catalogCoreSlugSet();
+    if (!coreSlugs.size) {
+      return [];
+    }
+
+    return cards
+      .filter((card) => coreSlugs.has(card.slug))
+      .sort((a, b) => cardLevel(b) - cardLevel(a) || a.name.localeCompare(b.name));
+  }
+
+  if (mode === "missing_evo") {
+    if (!state.collectionLoaded) {
+      return [];
+    }
+
+    return cards
+      .filter((card) => {
+        if (card.variant === "evolution") {
+          return !cardOwned(card);
+        }
+        if (card.variant !== "base") {
+          return false;
+        }
+        return EVO_VARIANT_SLUGS.has(card.slug) && (state.evolutionLevels.get(card.slug) ?? 0) <= 0;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  return cards;
+}
+
 function visibleCards() {
   const query = state.search.trim().toLowerCase();
 
-  return ENRICHED_CARDS.filter((card) => {
+  const scoped = ENRICHED_CARDS.filter((card) => {
     if (!matchesFilter(card)) {
       return false;
     }
@@ -1499,6 +1680,8 @@ function visibleCards() {
 
     return card.searchBlob.includes(query);
   });
+
+  return applyCatalogQuickFilter(scoped);
 }
 
 function renderCatalog() {
@@ -1511,7 +1694,10 @@ function renderCatalog() {
   if (!cards.length) {
     const empty = document.createElement("p");
     empty.className = "meta";
-    empty.textContent = "No cards match this search/filter.";
+    const quickLabel = catalogFilterLabel(state.catalogQuickFilter);
+    empty.textContent = quickLabel === "All"
+      ? "No cards match this search/filter."
+      : `No cards match quick filter: ${quickLabel}.`;
     elements.catalogGrid.appendChild(empty);
     return;
   }
@@ -1579,6 +1765,77 @@ function renderCatalog() {
 
     elements.catalogGrid.appendChild(article);
   }
+}
+
+function renderCatalogQuickFilters() {
+  if (!elements.catalogQuickFilters) {
+    return;
+  }
+
+  const chips = elements.catalogQuickFilters.querySelectorAll("button[data-catalog-quick]");
+  chips.forEach((chip) => {
+    const mode = chip.dataset.catalogQuick || "all";
+    chip.classList.toggle("active", mode === state.catalogQuickFilter);
+  });
+}
+
+function renderCollectionInsights() {
+  if (!elements.catalogInsights) {
+    return;
+  }
+
+  const owned = state.collectionLoaded ? state.ownedLevels.size : 0;
+  const totalBase = Number(CARD_META.base_count || BASE_CARDS.length || 121);
+  const evoCount = state.collectionLoaded ? state.evolutionLevels.size : 0;
+  const heroCount = state.collectionLoaded
+    ? [...HERO_VARIANT_SLUGS].filter((slug) => state.ownedLevels.has(slug)).length
+    : 0;
+  const avgOwned = averageOwnedCollectionLevel();
+
+  if (elements.collectionProgressOwned) {
+    elements.collectionProgressOwned.textContent = `${owned} / ${totalBase}`;
+  }
+  if (elements.collectionProgressEvo) {
+    elements.collectionProgressEvo.textContent = `${evoCount}`;
+  }
+  if (elements.collectionProgressHero) {
+    elements.collectionProgressHero.textContent = `${heroCount}`;
+  }
+  if (elements.collectionAvgLevel) {
+    elements.collectionAvgLevel.textContent = state.collectionLoaded ? avgOwned.toFixed(1) : "0.0";
+  }
+
+  const visibleCount = visibleCards().length;
+  if (elements.catalogInsightsStatus) {
+    if (!state.collectionLoaded) {
+      elements.catalogInsightsStatus.textContent = "Load your collection for deeper insights.";
+    } else {
+      elements.catalogInsightsStatus.textContent = `${visibleCount} cards visible • Quick mode: ${catalogFilterLabel(state.catalogQuickFilter)}`;
+    }
+  }
+
+  if (elements.collectionLowLevelList) {
+    const insightDeck = preferredCardsForInsights();
+    if (!insightDeck.cards.length) {
+      elements.collectionLowLevelList.innerHTML = '<li class="meta">Build or load a deck to see weak links.</li>';
+    } else {
+      const weakest = [...insightDeck.cards]
+        .sort((a, b) => cardLevel(a) - cardLevel(b) || a.name.localeCompare(b.name))
+        .slice(0, 3);
+
+      elements.collectionLowLevelList.innerHTML = weakest
+        .map((card) => {
+          const level = cardLevel(card);
+          const warning = state.collectionLoaded && avgOwned > 0 && level <= avgOwned - 1.5
+            ? ' <span class="insight-warning">under target</span>'
+            : "";
+          return `<li><span>${escapeHtml(card.name)}</span><strong>L${level}</strong>${warning}</li>`;
+        })
+        .join("");
+    }
+  }
+
+  renderCatalogQuickFilters();
 }
 
 function renderDeckSlots() {
@@ -1992,6 +2249,8 @@ function renderOwnedCards() {
     return;
   }
 
+  elements.ownedCardsGrid.classList.remove("is-loading-grid");
+
   if (!state.collectionLoaded || !state.ownedCards.length) {
     elements.ownedCardsCount.textContent = "0 cards";
     elements.ownedCardsGrid.innerHTML = '<p class="meta">Load a player tag to view owned cards.</p>';
@@ -2051,6 +2310,7 @@ function renderAll() {
   renderOwnedCards();
   renderFilters();
   renderCatalog();
+  renderCollectionInsights();
   renderDeckSlots();
   renderStats(metrics);
   renderCoverage(metrics);
@@ -2243,6 +2503,9 @@ function setCollectionLoading(loading) {
   elements.clearCollectionBtn.disabled = loading;
   elements.loadCollectionBtn.textContent = loading ? "Fetching..." : "Fetch My Cards";
   document.body.classList.toggle("collection-loading", Boolean(loading));
+  if (elements.ownedCardsGrid) {
+    elements.ownedCardsGrid.classList.toggle("is-loading-grid", Boolean(loading));
+  }
 
   if (loading) {
     if (elements.playerProfileContent) {
@@ -2255,11 +2518,13 @@ function setCollectionLoading(loading) {
     }
 
     if (elements.ownedCardsGrid) {
-      elements.ownedCardsGrid.innerHTML = `
-        <article class="owned-card-item skeleton-card"><span class="skeleton-line"></span><span class="skeleton-line"></span><span class="skeleton-line short"></span></article>
-        <article class="owned-card-item skeleton-card"><span class="skeleton-line"></span><span class="skeleton-line"></span><span class="skeleton-line short"></span></article>
-        <article class="owned-card-item skeleton-card"><span class="skeleton-line"></span><span class="skeleton-line"></span><span class="skeleton-line short"></span></article>
-      `;
+      const skeletonCards = new Array(8)
+        .fill(0)
+        .map(
+          () => '<article class="owned-card-item skeleton-card"><span class="skeleton-line"></span><span class="skeleton-line"></span><span class="skeleton-line short"></span></article>'
+        )
+        .join("");
+      elements.ownedCardsGrid.innerHTML = skeletonCards;
       elements.ownedCardsCount.textContent = "Loading...";
     }
   }
@@ -2388,6 +2653,7 @@ async function loadCollectionFromApi() {
     );
 
     void refreshSavedProfilesList();
+    void refreshStatusTracker();
   } catch (error) {
     const message = error?.name === "AbortError"
       ? "Request timed out while contacting your server route."
@@ -3456,97 +3722,946 @@ function formatUpgradeAdviceResponse() {
   ].join("\n");
 }
 
-function coachReply(rawMessage) {
+function formatRelativeTime(isoString) {
+  const date = new Date(isoString || "");
+  if (Number.isNaN(date.getTime())) {
+    return "unknown";
+  }
+
+  const diffMs = Date.now() - date.getTime();
+  const diffSec = Math.max(0, Math.floor(diffMs / 1000));
+  if (diffSec < 5) return "just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
+
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+
+  return date.toLocaleDateString();
+}
+
+function normalizeStateLabel(value) {
+  const normalized = String(value || "stale").toLowerCase();
+  if (["online", "syncing", "stale", "error"].includes(normalized)) {
+    return normalized;
+  }
+  return "stale";
+}
+
+function setStatusTile(valueEl, timeEl, state, timeValue, emptyText) {
+  if (!valueEl || !timeEl) {
+    return;
+  }
+
+  const normalizedState = normalizeStateLabel(state);
+  const tile = valueEl.closest(".status-tile");
+  if (tile) {
+    tile.dataset.state = normalizedState;
+  }
+
+  valueEl.textContent = normalizedState;
+  timeEl.textContent = timeValue ? formatRelativeTime(timeValue) : (emptyText || "No data");
+}
+
+function renderStatusTracker() {
+  if (!state.statusSnapshot) {
+    return;
+  }
+
+  const snapshot = state.statusSnapshot;
+  if (elements.statusBuildLabel) {
+    const label = snapshot?.build?.label || "local-dev";
+    const botVersion = snapshot?.build?.chatbotVersion || "coach-v2";
+    elements.statusBuildLabel.textContent = `Build: ${label} • Chatbot: ${botVersion}`;
+  }
+
+  setStatusTile(
+    elements.statusApiState,
+    elements.statusApiTime,
+    snapshot?.api?.state,
+    snapshot?.api?.lastSuccessfulPlayerFetch,
+    "No successful fetch yet"
+  );
+  setStatusTile(
+    elements.statusDeckState,
+    elements.statusDeckTime,
+    snapshot?.decks?.state,
+    snapshot?.decks?.lastDeckSync,
+    "No deck sync yet"
+  );
+  setStatusTile(
+    elements.statusChatState,
+    elements.statusChatTime,
+    snapshot?.chatbot?.state,
+    snapshot?.chatbot?.lastUpdate,
+    "No recent chatbot updates"
+  );
+
+  if (!elements.statusActivityList) {
+    return;
+  }
+
+  const activity = Array.isArray(snapshot?.activity) ? snapshot.activity : [];
+  if (!activity.length) {
+    elements.statusActivityList.innerHTML = '<p class="meta">No recent activity yet.</p>';
+    return;
+  }
+
+  elements.statusActivityList.innerHTML = activity
+    .slice(0, 10)
+    .map((entry) => {
+      const component = escapeHtml(entry.component || "system");
+      const message = escapeHtml(entry.message || "");
+      const detail = escapeHtml(entry.detail || "");
+      const stateLabel = normalizeStateLabel(entry.state || "stale");
+      const timeText = formatRelativeTime(entry.createdAt || "");
+      return `
+        <article class="status-activity-item" data-state="${stateLabel}">
+          <p><strong>${component}</strong> • ${stateLabel}</p>
+          <p>${message}</p>
+          ${detail ? `<p>${detail}</p>` : ""}
+          <p class="line-meta">${timeText}</p>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function appApiRequest(path, options = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(path, {
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {})
+      },
+      signal: controller.signal
+    });
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (_error) {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      throw new Error(payload?.error || `Request failed (${response.status})`);
+    }
+
+    return payload || {};
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function refreshStatusTracker() {
+  try {
+    const payload = await appApiRequest(STATUS_API, { method: "GET" }, 8000);
+    state.statusSnapshot = payload;
+    renderStatusTracker();
+    refreshInteractiveMotion();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Status refresh failed.";
+    if (elements.statusBuildLabel) {
+      elements.statusBuildLabel.textContent = `Build: ${APP_BUILD_LABEL} • Status unavailable`;
+    }
+    setStatus(`Status refresh failed: ${message}`, "warn");
+  }
+}
+
+function startStatusPolling() {
+  if (state.statusPollTimer) {
+    clearInterval(state.statusPollTimer);
+  }
+  state.statusPollTimer = setInterval(() => {
+    void refreshStatusTracker();
+  }, STATUS_REFRESH_INTERVAL_MS);
+}
+
+async function pingChatbotStatus(message) {
+  try {
+    await appApiRequest(
+      CHATBOT_PING_API,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ message })
+      },
+      5000
+    );
+  } catch (_error) {
+    // Status ping is best-effort only.
+  }
+}
+
+function persistDeckExplorerFavoritesLocal() {
+  const ids = [...state.deckExplorerFavorites];
+  localStorage.setItem(DECK_EXPLORER_FAVORITES_KEY, JSON.stringify(ids));
+}
+
+function loadDeckExplorerFavoritesLocal() {
+  const raw = localStorage.getItem(DECK_EXPLORER_FAVORITES_KEY);
+  const parsed = raw ? safeJsonParse(raw, []) : [];
+  if (Array.isArray(parsed)) {
+    state.deckExplorerFavorites = new Set(parsed.map((item) => String(item || "")).filter(Boolean));
+  }
+}
+
+function deckExplorerTagClass(tag) {
+  return String(tag || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function renderDeckExplorerFilters() {
+  const decks = Array.isArray(state.deckExplorer.decks) ? state.deckExplorer.decks : [];
+
+  const archetypes = [...new Set(decks.map((deck) => String(deck.archetype || "Unknown").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+
+  if (elements.deckExplorerArchetypeSelect) {
+    const options = ['<option value="all">All archetypes</option>'];
+    archetypes.forEach((archetype) => {
+      options.push(`<option value="${escapeHtml(archetype)}">${escapeHtml(archetype)}</option>`);
+    });
+    elements.deckExplorerArchetypeSelect.innerHTML = options.join("");
+    elements.deckExplorerArchetypeSelect.value = archetypes.includes(state.deckExplorer.archetype)
+      ? state.deckExplorer.archetype
+      : "all";
+  }
+
+  const tags = [...new Set(
+    decks
+      .flatMap((deck) => Array.isArray(deck.tags) ? deck.tags : [])
+      .map((tag) => String(tag || "").trim().toLowerCase())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+
+  if (elements.deckExplorerTagSelect) {
+    const options = ['<option value="all">All labels</option>'];
+    tags.forEach((tag) => {
+      options.push(`<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`);
+    });
+    elements.deckExplorerTagSelect.innerHTML = options.join("");
+    elements.deckExplorerTagSelect.value = tags.includes(state.deckExplorer.tag)
+      ? state.deckExplorer.tag
+      : "all";
+  }
+}
+
+function filteredDeckExplorerDecks() {
+  const query = String(state.deckExplorer.search || "").trim().toLowerCase();
+
+  return (state.deckExplorer.decks || [])
+    .filter((deck) => {
+      if (!deck || !Array.isArray(deck.cards)) {
+        return false;
+      }
+
+      if (state.deckExplorer.favoritesOnly && !state.deckExplorerFavorites.has(deck.id)) {
+        return false;
+      }
+
+      if (state.deckExplorer.sourceType !== "all" && String(deck.sourceType || "") !== state.deckExplorer.sourceType) {
+        return false;
+      }
+
+      if (state.deckExplorer.archetype !== "all" && String(deck.archetype || "") !== state.deckExplorer.archetype) {
+        return false;
+      }
+
+      if (state.deckExplorer.tag !== "all") {
+        const tags = Array.isArray(deck.tags) ? deck.tags.map((tag) => String(tag || "").toLowerCase()) : [];
+        if (!tags.includes(state.deckExplorer.tag)) {
+          return false;
+        }
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const searchBlob = [
+        deck.name,
+        deck.archetype,
+        deck.notes,
+        ...(deck.cards || []).map((card) => card.name || ""),
+        ...(Array.isArray(deck.tags) ? deck.tags : [])
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return searchBlob.includes(query);
+    })
+    .sort((a, b) => {
+      const popA = Number(a.popularity || 0);
+      const popB = Number(b.popularity || 0);
+      return popB - popA || String(a.name || "").localeCompare(String(b.name || ""));
+    });
+}
+
+function closeDeckDetailModal() {
+  if (!elements.deckDetailModal) {
+    return;
+  }
+  elements.deckDetailModal.classList.remove("open");
+  elements.deckDetailModal.setAttribute("aria-hidden", "true");
+}
+
+function openDeckDetailModal(deckId) {
+  const deck = (state.deckExplorer.decks || []).find((item) => String(item.id) === String(deckId));
+  if (!deck || !elements.deckDetailModal || !elements.deckDetailContent) {
+    return;
+  }
+
+  const cards = Array.isArray(deck.cards) ? deck.cards : [];
+  const tags = Array.isArray(deck.tags) ? deck.tags : [];
+
+  elements.deckDetailContent.innerHTML = `
+    <article class="coach-mini-card">
+      <h5>${escapeHtml(deck.name || "Deck")}</h5>
+      <p class="deck-line"><strong>Archetype:</strong> ${escapeHtml(deck.archetype || "Unknown")}</p>
+      <p class="deck-line"><strong>Average Elixir:</strong> ${Number(deck.averageElixir || 0).toFixed(2)}</p>
+      <p class="deck-line"><strong>Source:</strong> ${escapeHtml(deck.source || "Unknown")}${deck.playerName ? ` • ${escapeHtml(deck.playerName)}` : ""}</p>
+      <p class="deck-line"><strong>Labels:</strong> ${tags.length ? tags.map((tag) => escapeHtml(tag)).join(", ") : "none"}</p>
+      <p class="deck-line"><strong>Notes:</strong> ${escapeHtml(deck.notes || "No notes")}</p>
+      <div class="modal-grid-cards">
+        ${cards.map((card) => `<div class="modal-card-line">${escapeHtml(card.name || "Unknown")}</div>`).join("")}
+      </div>
+    </article>
+  `;
+
+  elements.deckDetailModal.classList.add("open");
+  elements.deckDetailModal.setAttribute("aria-hidden", "false");
+  refreshInteractiveMotion();
+}
+
+function loadExplorerDeckToBuilder(deckId) {
+  const deck = (state.deckExplorer.decks || []).find((item) => String(item.id) === String(deckId));
+  if (!deck || !Array.isArray(deck.cards) || deck.cards.length < DECK_SIZE) {
+    setStatus("Explorer deck is not available.", "warn");
+    return;
+  }
+
+  const resolvedCards = deck.cards
+    .map((rawCard) => {
+      const slug = rawCard?.slug || apiNameToSlug(rawCard?.name || "");
+      return slug ? preferredVariantCardForSlug(slug) : null;
+    })
+    .filter(Boolean);
+
+  if (resolvedCards.length < DECK_SIZE) {
+    setStatus("Some cards from this explorer deck do not exist in your local dataset yet.", "warn");
+    return;
+  }
+
+  state.deck = resolvedCards.slice(0, DECK_SIZE).map((card) => card.id);
+  renderAll();
+  setStatus(`Loaded explorer deck: ${deck.name}.`, "info");
+  addHistoryEntry("explorer", "Explorer deck loaded", deck.name || "Deck");
+}
+
+function toggleExplorerFavorite(deckId) {
+  const id = String(deckId || "");
+  if (!id) {
+    return;
+  }
+
+  if (state.deckExplorerFavorites.has(id)) {
+    state.deckExplorerFavorites.delete(id);
+  } else {
+    state.deckExplorerFavorites.add(id);
+  }
+
+  persistDeckExplorerFavoritesLocal();
+  renderDeckExplorer();
+}
+
+function renderDeckExplorer() {
+  if (!elements.deckExplorerGrid) {
+    return;
+  }
+
+  const decks = filteredDeckExplorerDecks();
+
+  if (!decks.length) {
+    elements.deckExplorerGrid.innerHTML = '<p class="meta">No decks match your current filters.</p>';
+  } else {
+    elements.deckExplorerGrid.innerHTML = decks
+      .map((deck) => {
+        const cards = Array.isArray(deck.cards) ? deck.cards.slice(0, DECK_SIZE) : [];
+        const tags = Array.isArray(deck.tags) ? deck.tags.slice(0, 4) : [];
+        const favorite = state.deckExplorerFavorites.has(deck.id);
+        const sourceType = String(deck.sourceType || "").replace(/_/g, " ");
+
+        return `
+          <article class="explorer-deck-card motion-tilt">
+            <div class="explorer-deck-head">
+              <div>
+                <h4>${escapeHtml(deck.name || "Deck")}</h4>
+                <p class="explorer-deck-sub">${escapeHtml(deck.archetype || "Unknown")} • Avg ${Number(deck.averageElixir || 0).toFixed(2)} • ${escapeHtml(sourceType)}</p>
+              </div>
+              <span class="score-chip">Pop ${Number(deck.popularity || 0)}</span>
+            </div>
+            <div class="explorer-card-list">
+              ${cards.map((card) => `<span class="explorer-card-chip">${escapeHtml(card.name || "Unknown")}</span>`).join("")}
+            </div>
+            <div class="explorer-label-row">
+              ${tags.map((tag) => `<span class="explorer-label ${deckExplorerTagClass(tag)}">${escapeHtml(tag)}</span>`).join("")}
+            </div>
+            <p class="deck-line">${escapeHtml(deck.notes || "")}</p>
+            <div class="explorer-actions">
+              <button class="btn subtle" type="button" data-explorer-load="${escapeHtml(deck.id)}">Load</button>
+              <button class="btn ghost" type="button" data-explorer-favorite="${escapeHtml(deck.id)}">${favorite ? "Unfavorite" : "Favorite"}</button>
+              <button class="btn ghost" type="button" data-explorer-detail="${escapeHtml(deck.id)}">Details</button>
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+  }
+
+  if (elements.deckExplorerMeta) {
+    const meta = state.deckExplorer.meta || {};
+    const counts = meta.counts || {};
+    const syncedAt = meta.syncedAt ? formatRelativeTime(meta.syncedAt) : "never";
+    elements.deckExplorerMeta.textContent = `${decks.length} shown • ${Number(counts.total || state.deckExplorer.decks.length || 0)} total • Synced ${syncedAt}`;
+  }
+
+  refreshInteractiveMotion();
+}
+
+async function refreshDeckExplorer(forceRefresh = false) {
+  if (elements.deckExplorerMeta) {
+    elements.deckExplorerMeta.textContent = "Syncing deck explorer...";
+  }
+
+  try {
+    const suffix = forceRefresh ? "?refresh=1" : "";
+    const payload = await appApiRequest(`${DECK_EXPLORER_API}${suffix}`, { method: "GET" }, 12000);
+
+    state.deckExplorer.decks = Array.isArray(payload?.decks) ? payload.decks : [];
+    state.deckExplorer.sections = payload?.sections || { topPlayerDecks: [], popularDecks: [], metaDecks: [] };
+    state.deckExplorer.meta = payload?.meta || null;
+
+    renderDeckExplorerFilters();
+    renderDeckExplorer();
+
+    const errors = Array.isArray(payload?.meta?.errors) ? payload.meta.errors : [];
+    if (errors.length) {
+      setStatus(`Deck explorer synced with warnings: ${errors[0]}`, "warn");
+    } else {
+      setStatus(`Deck explorer synced: ${state.deckExplorer.decks.length} decks loaded.`, "info");
+    }
+
+    void refreshStatusTracker();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Deck explorer sync failed.";
+    if (elements.deckExplorerMeta) {
+      elements.deckExplorerMeta.textContent = `Deck explorer error: ${message}`;
+    }
+    setStatus(`Deck explorer error: ${message}`, "bad");
+  }
+}
+
+function parseTrophyHint(message) {
+  const text = String(message || "").toLowerCase();
+  const direct = text.match(/(?:at|around|near)\s*(\d{3,5})\s*(?:troph|cup)?/);
+  if (direct) {
+    return Number(direct[1]);
+  }
+  const generic = text.match(/(\d{4,5})\s*(?:troph|cups)/);
+  if (generic) {
+    return Number(generic[1]);
+  }
+  return 0;
+}
+
+function serializeDeckForCoachContext(cards = []) {
+  if (!Array.isArray(cards)) {
+    return [];
+  }
+
+  return cards
+    .slice(0, DECK_SIZE)
+    .map((card) => ({
+      name: card.name,
+      slug: card.slug,
+      level: state.collectionLoaded ? cardLevel(card) : 0,
+      variant: card.variant || "base",
+      rarity: card.rarity || "Unknown",
+      elixir: numericElixir(card),
+      evolutionLevel: state.collectionLoaded ? cardEvolutionLevel(card) : 0
+    }));
+}
+
+function snapshotDeckForCoachContext(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.cardIds)) {
+    return [];
+  }
+  return serializeDeckForCoachContext(cardsFromSnapshot(snapshot));
+}
+
+function ownedCardsForCoachContext() {
+  if (!state.collectionLoaded || !Array.isArray(state.ownedCards)) {
+    return [];
+  }
+
+  return state.ownedCards
+    .map((card) => ({
+      name: card.name,
+      slug: card.slug || "",
+      level: Number(card.level ?? 0),
+      maxLevel: Number(card.maxLevel ?? 0),
+      count: Number(card.count ?? 0),
+      evolutionLevel: Number(card.evolutionLevel ?? 0),
+      variant: card.variant || "base",
+      hasEvoVariant: Boolean(card.hasEvoVariant),
+      hasHeroVariant: Boolean(card.hasHeroVariant)
+    }))
+    .filter((card) => Number.isFinite(card.level) && card.level > 0)
+    .sort((a, b) => b.level - a.level || a.name.localeCompare(b.name))
+    .slice(0, 180);
+}
+
+function buildCoachContextPayload(userMessage = "") {
+  const currentDeck = serializeDeckForCoachContext(deckCards());
+  const lastSuggestedDeck = state.coachRecommendations[0]?.cards?.length
+    ? serializeDeckForCoachContext(state.coachRecommendations[0].cards)
+    : [];
+  const pinnedDeck = snapshotDeckForCoachContext(state.pinnedDeck);
+
+  let collectionStatus = "not loaded";
+  if (state.collectionLoaded) {
+    collectionStatus = `loaded (${state.ownedCards.length} cards)`;
+  }
+
+  const analysisSnippet = state.lastAnalysisText
+    ? state.lastAnalysisText.split("\n").slice(0, 4).join(" ").slice(0, 360)
+    : "";
+
+  const context = {
+    playerName: state.playerProfile?.name || state.loadedPlayerName || "Unknown",
+    playerTag: state.playerProfile?.tag || state.loadedPlayerTag || (elements.playerTagInput?.value || "Unknown"),
+    trophies: Number(state.playerProfile?.trophies || 0),
+    arena: state.playerProfile?.arena || "Unknown",
+    preferredPlaystyle: state.playstylePreference || "no_preference",
+    currentDeck,
+    ownedCards: ownedCardsForCoachContext(),
+    favoriteDeck: pinnedDeck,
+    lastSuggestedDeck,
+    pinnedDeck,
+    struggleDecks: [],
+    extraNotes: analysisSnippet || "Not provided",
+    collectionStatus,
+    userMessage
+  };
+
+  return context;
+}
+
+function normalizeSuggestionList(suggestions, fallbackIntent) {
+  if (Array.isArray(suggestions)) {
+    const clean = suggestions
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .slice(0, 6);
+    if (clean.length) {
+      return clean;
+    }
+  }
+  return suggestionChipsForIntent(fallbackIntent);
+}
+
+async function requestCoachReplyFromApi(message, intentData) {
+  const payload = {
+    message,
+    sessionId: state.chatContext.sessionId || "",
+    context: buildCoachContextPayload(message)
+  };
+
+  const response = await appApiRequest(
+    COACH_CHAT_API,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    },
+    50000
+  );
+
+  const sessionId = String(response?.sessionId || "").trim();
+  if (sessionId) {
+    state.chatContext.sessionId = sessionId;
+    localStorage.setItem(CHAT_SESSION_STORAGE_KEY, sessionId);
+  }
+
+  const text = String(response?.reply || "").trim();
+  if (!text) {
+    throw new Error("Coach returned an empty reply.");
+  }
+
+  return {
+    text,
+    suggestions: normalizeSuggestionList(response?.suggestions, intentData.intent),
+    source: String(response?.provider || "ollama")
+  };
+}
+
+function primeCoachStateForIntent(intentData) {
+  if (!intentData || !intentData.intent) {
+    return;
+  }
+
+  if (intentData.intent === "safe_deck") {
+    formatDeckBuildResponse("safest deck control");
+  } else if (intentData.intent === "aggressive_deck") {
+    formatDeckBuildResponse("most aggressive deck beatdown");
+  } else if (intentData.intent === "deck_build") {
+    formatDeckBuildResponse(intentData.query || "best deck");
+  }
+}
+
+function detectCoachIntent(rawMessage) {
   const message = String(rawMessage || "").trim();
   const q = message.toLowerCase();
 
   const loadMatch = q.match(/^load\s+(\d+)/);
   if (loadMatch) {
-    const index = Number(loadMatch[1]) - 1;
-    const rec = state.coachRecommendations[index];
-
-    if (!rec) {
-      return "I do not have that recommendation index yet. Ask for deck recommendations first.";
-    }
-
-    if (!rec.ready) {
-      return `Recommendation ${index + 1} is not fully playable yet. Missing: ${rec.missing.join(", ")}.`;
-    }
-
-    state.deck = rec.cards.map((card) => card.id);
-    renderAll();
-    return `Loaded deck ${index + 1}: ${rec.name}.`;
+    return {
+      intent: "load_recommendation",
+      index: Number(loadMatch[1]) - 1,
+      query: q,
+      raw: message,
+      trophyHint: parseTrophyHint(q)
+    };
   }
 
-  if (
-    q.includes("list my cards") ||
-    q.includes("show my cards") ||
-    q.includes("owned cards") ||
-    q.includes("my collection") ||
-    q.includes("list cards") ||
-    q.includes("what do i own")
-  ) {
-    return listOwnedCardsWithLevels();
+  const trophyHint = parseTrophyHint(q);
+
+  if (q.includes("list my cards") || q.includes("show my cards") || q.includes("what do i own") || q.includes("owned cards")) {
+    return { intent: "list_cards", query: q, raw: message, trophyHint };
   }
 
-  if (
-    q.includes("analy") ||
-    q.includes("rate my deck") ||
-    q.includes("is this deck good") ||
-    q.includes("judge my deck")
-  ) {
-    return explainCurrentDeck();
+  if (q.includes("upgrade") || q.includes("what should i upgrade") || q.includes("priority")) {
+    return { intent: "upgrade", query: q, raw: message, trophyHint };
   }
 
-  if (
-    q.includes("upgrade") ||
-    q.includes("level up") ||
-    q.includes("what should i upgrade") ||
-    q.includes("priority upgrades")
-  ) {
-    return formatUpgradeAdviceResponse();
+  if (q.includes("analy") || q.includes("is this deck") || q.includes("rate my deck") || q.includes("bad deck")) {
+    return { intent: "analyze", query: q, raw: message, trophyHint };
   }
 
-  if (
-    q.includes("recommend") ||
-    q.includes("what deck") ||
-    q.includes("should i run") ||
-    q.includes("best deck") ||
-    q.includes("build") ||
-    q.includes("deck")
-  ) {
-    return formatDeckBuildResponse(q);
+  if (q.includes("safer") || q.includes("safe version")) {
+    return { intent: "safe_deck", query: q, raw: message, trophyHint };
   }
 
-  if (q.includes("hello") || q.includes("hey") || q.includes("who are you")) {
-    return "I am your Clash Royale deck coach. Ask me to build a deck from your collection, analyze your current deck, or rank your upgrade priorities.";
+  if (q.includes("aggressive") || q.includes("more pressure") || q.includes("faster version")) {
+    return { intent: "aggressive_deck", query: q, raw: message, trophyHint };
   }
 
-  return 'Ask me: "build my best deck", "analyze my deck", "upgrade priority", "list my cards", or "load 1".';
+  if (q.includes("matchup") || q.includes("counter") || q.includes("hard matchup") || q.includes("i keep losing")) {
+    return { intent: "matchup", query: q, raw: message, trophyHint };
+  }
+
+  if (q.includes("best deck") || q.includes("build") || q.includes("what deck") || q.includes("should i run") || q.includes("push")) {
+    return { intent: "deck_build", query: q, raw: message, trophyHint };
+  }
+
+  if (trophyHint > 0 && state.chatContext.lastIntent !== "none") {
+    return { intent: "trophy_followup", query: q, raw: message, trophyHint };
+  }
+
+  if (q.includes("hello") || q.includes("hey") || q.includes("yo") || q.includes("who are you")) {
+    return { intent: "greeting", query: q, raw: message, trophyHint };
+  }
+
+  return { intent: "chat", query: q, raw: message, trophyHint };
 }
 
-function sendCoachMessage(text) {
-  if (!text.trim()) {
+function suggestionChipsForIntent(intent) {
+  if (intent === "deck_build" || intent === "safe_deck" || intent === "aggressive_deck") {
+    return ["load 1", "give me safer version", "most aggressive deck", "best upgrade path"];
+  }
+  if (intent === "analyze") {
+    return ["biggest weakness?", "best fix", "good matchups", "load 1"];
+  }
+  if (intent === "upgrade") {
+    return ["must upgrade now", "good soon", "don't waste gold yet", "analyze my deck"];
+  }
+  if (intent === "matchup") {
+    return ["what are risky matchups?", "opening plays", "double elixir plan", "safer version"];
+  }
+  return ["build my best deck", "analyze my deck", "what should i upgrade first?", "list my cards"];
+}
+
+function renderChatSuggestions(suggestions = state.chatContext.suggestions) {
+  if (!elements.chatSuggestions) {
     return;
   }
 
-  pushChatMessage("user", text);
-  const reply = coachReply(text);
-  pushChatMessage("bot", reply);
+  const list = Array.isArray(suggestions) ? suggestions.filter(Boolean).slice(0, 6) : [];
+  if (!list.length) {
+    elements.chatSuggestions.innerHTML = "";
+    return;
+  }
+
+  elements.chatSuggestions.innerHTML = list
+    .map((item) => `<button class="chat-chip" type="button" data-chat-suggestion="${escapeHtml(item)}">${escapeHtml(item)}</button>`)
+    .join("");
+  refreshInteractiveMotion();
+}
+
+function pushTypingIndicator() {
+  if (!elements.chatLog) {
+    return null;
+  }
+
+  const row = document.createElement("div");
+  row.className = "chat-row bot typing";
+
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble";
+  bubble.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+
+  row.appendChild(bubble);
+  elements.chatLog.appendChild(row);
+  elements.chatLog.scrollTop = elements.chatLog.scrollHeight;
+
+  return row;
+}
+
+function formatMatchupAnswer() {
+  const cards = deckCards();
+  if (!cards.length) {
+    return [
+      "Quick Verdict",
+      "Limited by missing deck",
+      "",
+      "Biggest Problem",
+      "No active deck is loaded, so matchup advice would be generic and less useful.",
+      "",
+      "Best Fix",
+      "Load an 8-card deck first, then ask for matchup guidance again.",
+      "",
+      "Full Explanation",
+      "Matchup coaching depends on your exact win condition, spells, and defense core. Once your deck is loaded, I can give good/bad/risky matchups and a clean game plan."
+    ].join("\n");
+  }
+
+  const metrics = calculateMetrics(cards);
+  const matchups = matchupOverview(cards, metrics);
+  const verdict = deckLadderVerdict(metrics);
+  const biggestProblem = deckBiggestProblem(metrics);
+  const bestFix = deckBestFix(metrics);
+
+  return [
+    "Quick Verdict",
+    verdict,
+    "",
+    "Biggest Problem",
+    biggestProblem,
+    "",
+    "Best Fix",
+    bestFix,
+    "",
+    "Full Explanation",
+    `Good matchups: ${matchups.good.join("; ")}.`,
+    `Bad matchups: ${matchups.bad.join("; ")}.`,
+    `Risky matchups: ${riskyMatchups(cards, metrics).join("; ")}.`,
+    `How to play these matchups: ${gamePlanNotes(inferArchetype(cards, metrics, []), metrics).mid}`
+  ].join("\n");
+}
+
+function formatTrophyFollowup(trophiesHint) {
+  const mainDeck = state.coachRecommendations[0]?.cards?.length ? state.coachRecommendations[0].cards : deckCards();
+  if (!mainDeck.length) {
+    return [
+      "Quick Verdict",
+      "Limited by missing deck",
+      "",
+      "Biggest Problem",
+      "You asked for trophy-range tuning, but no deck is loaded.",
+      "",
+      "Best Fix",
+      "Load or build a deck first, then ask again with your trophy range.",
+      "",
+      "Full Explanation",
+      `I can tune recommendations for ${trophiesHint || "your"} trophies once I have a real deck to score.`
+    ].join("\n");
+  }
+
+  const metrics = calculateMetrics(mainDeck);
+  const verdict = deckLadderVerdict(metrics);
+  const biggestProblem = deckBiggestProblem(metrics);
+  const bestFix = deckBestFix(metrics);
+
+  return [
+    "Quick Verdict",
+    verdict,
+    "",
+    "Biggest Problem",
+    biggestProblem,
+    "",
+    "Best Fix",
+    bestFix,
+    "",
+    "Full Explanation",
+    `At ${trophiesHint} trophies: ${trophyRangeGuidance(trophiesHint)}`,
+    `Your best chance right now is to keep this structure clean and avoid forcing bad single-elixir pushes.`,
+    `If games feel harder at this range, safer version is usually better than greedier pressure builds.`
+  ].join("\n");
+}
+
+function coachReply(rawMessage) {
+  const intentData = detectCoachIntent(rawMessage);
+  const intent = intentData.intent;
+  const trophiesHint = Number(intentData.trophyHint || 0);
+
+  let text = "";
+
+  if (intent === "load_recommendation") {
+    const rec = state.coachRecommendations[intentData.index];
+    if (!rec) {
+      text = "I do not have that recommendation index yet. Ask for deck recommendations first.";
+    } else if (!rec.ready) {
+      text = `Recommendation ${intentData.index + 1} is not fully playable yet. Missing: ${rec.missing.join(", ")}.`;
+    } else {
+      state.deck = rec.cards.map((card) => card.id);
+      renderAll();
+      text = `Loaded deck ${intentData.index + 1}: ${rec.name}.`;
+    }
+  } else if (intent === "list_cards") {
+    text = listOwnedCardsWithLevels();
+  } else if (intent === "analyze") {
+    text = explainCurrentDeck();
+  } else if (intent === "upgrade") {
+    text = formatUpgradeAdviceResponse();
+  } else if (intent === "safe_deck") {
+    text = formatDeckBuildResponse("safest deck control");
+  } else if (intent === "aggressive_deck") {
+    text = formatDeckBuildResponse("most aggressive deck beatdown");
+  } else if (intent === "deck_build") {
+    text = formatDeckBuildResponse(intentData.query || "best deck");
+  } else if (intent === "matchup") {
+    text = formatMatchupAnswer();
+  } else if (intent === "trophy_followup") {
+    text = formatTrophyFollowup(trophiesHint || state.chatContext.lastTrophyHint || state.playerProfile?.trophies || 0);
+  } else if (intent === "greeting") {
+    text = "I am your ladder deck coach. Ask naturally and I will route it: build deck, analyze deck, matchup guidance, or upgrade priorities.";
+  } else {
+    text = [
+      "I can read normal chat now, not only commands.",
+      "Try: build my best deck, give me safer version, is this deck bad, what should I upgrade first, or what about at 9k trophies?"
+    ].join(" ");
+  }
+
+  state.chatContext.lastIntent = intent;
+  state.chatContext.lastMessageAt = isoNow();
+  if (trophiesHint > 0) {
+    state.chatContext.lastTrophyHint = trophiesHint;
+  }
+
+  const suggestions = suggestionChipsForIntent(intent);
+  state.chatContext.suggestions = suggestions;
+
+  return {
+    intent,
+    text,
+    suggestions
+  };
+}
+
+async function sendCoachMessage(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) {
+    return;
+  }
+
+  pushChatMessage("user", trimmed);
+
+  const intentData = detectCoachIntent(trimmed);
+
+  if (intentData.intent === "load_recommendation") {
+    const immediate = coachReply(trimmed);
+    pushChatMessage("bot", immediate.text);
+    renderChatSuggestions(immediate.suggestions);
+    renderCoachDeckCards(state.coachRecommendations);
+    renderComparisonSelectors();
+    renderCollectionInsights();
+    void pingChatbotStatus(`chat intent: ${immediate.intent}`);
+    return;
+  }
+
+  primeCoachStateForIntent(intentData);
+
+  const typingRow = pushTypingIndicator();
+  await new Promise((resolve) => setTimeout(resolve, 220));
+
+  let outputText = "";
+  let outputSuggestions = suggestionChipsForIntent(intentData.intent);
+  let outputIntent = intentData.intent;
+  let usedFallback = false;
+
+  try {
+    const aiReply = await requestCoachReplyFromApi(trimmed, intentData);
+    outputText = aiReply.text;
+    outputSuggestions = aiReply.suggestions;
+
+    state.chatContext.lastIntent = outputIntent;
+    state.chatContext.lastMessageAt = isoNow();
+    if (Number(intentData.trophyHint || 0) > 0) {
+      state.chatContext.lastTrophyHint = Number(intentData.trophyHint || 0);
+    }
+    state.chatContext.suggestions = outputSuggestions;
+  } catch (error) {
+    usedFallback = true;
+
+    const fallback = coachReply(trimmed);
+    outputText = fallback.text;
+    outputSuggestions = fallback.suggestions;
+    outputIntent = fallback.intent;
+
+    const reason = error instanceof Error ? error.message : "Ollama coach is unavailable.";
+    setStatus(`Ollama coach unavailable, local fallback used: ${reason}`, "warn");
+  } finally {
+    if (typingRow?.parentNode) {
+      typingRow.parentNode.removeChild(typingRow);
+    }
+  }
+
+  pushChatMessage("bot", outputText);
+  renderChatSuggestions(outputSuggestions);
 
   renderCoachDeckCards(state.coachRecommendations);
   renderComparisonSelectors();
+  renderCollectionInsights();
 
-  const q = String(text || "").toLowerCase();
-  if (q.includes("deck") || q.includes("analy") || q.includes("upgrade") || q.includes("recommend")) {
-    setAnalysisOutput(reply);
+  if (["deck_build", "safe_deck", "aggressive_deck", "analyze", "upgrade", "matchup", "trophy_followup"].includes(outputIntent)) {
+    setAnalysisOutput(outputText);
   }
-}
 
+  void pingChatbotStatus(`${usedFallback ? "fallback" : "ollama"} intent: ${outputIntent}`);
+}
 function bindEvents() {
   elements.searchInput.addEventListener("input", (event) => {
     state.search = event.target.value || "";
     renderCatalog();
+    renderCollectionInsights();
     refreshInteractiveMotion();
   });
 
@@ -3559,6 +4674,32 @@ function bindEvents() {
     state.activeFilter = button.dataset.filter;
     renderAll();
   });
+
+  if (elements.catalogQuickFilters) {
+    elements.catalogQuickFilters.addEventListener("click", (event) => {
+      const chip = event.target.closest("button[data-catalog-quick]");
+      if (!chip) {
+        return;
+      }
+
+      state.catalogQuickFilter = chip.dataset.catalogQuick || "all";
+      renderCatalog();
+      renderCollectionInsights();
+      refreshInteractiveMotion();
+    });
+  }
+
+  if (elements.insightUpgradeBtn) {
+    elements.insightUpgradeBtn.addEventListener("click", () => {
+      void runOneTapMode("upgrade");
+    });
+  }
+
+  if (elements.insightSafeDeckBtn) {
+    elements.insightSafeDeckBtn.addEventListener("click", () => {
+      void runOneTapMode("safe");
+    });
+  }
 
   elements.catalogGrid.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-add-card]");
@@ -3682,7 +4823,10 @@ function bindEvents() {
 
   if (elements.loadProfileBtn) {
     elements.loadProfileBtn.addEventListener("click", () => {
-      const selected = elements.savedProfilesSelect?.value || sanitizePlayerTag(elements.playerTagInput.value);
+      let selected = elements.savedProfilesSelect?.value || "";
+      if (!selected) {
+        selected = sanitizePlayerTag(elements.playerTagInput.value);
+      }
       if (!selected) {
         setStatus("Choose a saved profile first.", "warn");
         return;
@@ -3840,6 +4984,117 @@ function bindEvents() {
       }
     });
   }
+  if (elements.chatSuggestions) {
+    elements.chatSuggestions.addEventListener("click", (event) => {
+      const chip = event.target.closest("button[data-chat-suggestion]");
+      if (!chip) {
+        return;
+      }
+      const text = chip.dataset.chatSuggestion || "";
+      if (!text) {
+        return;
+      }
+      if (elements.chatInput) {
+        elements.chatInput.value = text;
+      }
+      void sendCoachMessage(text);
+    });
+  }
+
+  if (elements.refreshStatusBtn) {
+    elements.refreshStatusBtn.addEventListener("click", () => {
+      void refreshStatusTracker();
+    });
+  }
+
+  if (elements.syncDeckDbBtn) {
+    elements.syncDeckDbBtn.addEventListener("click", () => {
+      void refreshDeckExplorer(true);
+    });
+  }
+
+  if (elements.refreshDeckExplorerBtn) {
+    elements.refreshDeckExplorerBtn.addEventListener("click", () => {
+      void refreshDeckExplorer(true);
+    });
+  }
+
+  if (elements.deckExplorerSearchInput) {
+    elements.deckExplorerSearchInput.addEventListener("input", (event) => {
+      state.deckExplorer.search = String(event.target.value || "");
+      renderDeckExplorer();
+    });
+  }
+
+  if (elements.deckExplorerArchetypeSelect) {
+    elements.deckExplorerArchetypeSelect.addEventListener("change", (event) => {
+      state.deckExplorer.archetype = String(event.target.value || "all");
+      renderDeckExplorer();
+    });
+  }
+
+  if (elements.deckExplorerSourceSelect) {
+    elements.deckExplorerSourceSelect.addEventListener("change", (event) => {
+      state.deckExplorer.sourceType = String(event.target.value || "all");
+      renderDeckExplorer();
+    });
+  }
+
+  if (elements.deckExplorerTagSelect) {
+    elements.deckExplorerTagSelect.addEventListener("change", (event) => {
+      state.deckExplorer.tag = String(event.target.value || "all");
+      renderDeckExplorer();
+    });
+  }
+
+  if (elements.deckExplorerFavoritesToggle) {
+    elements.deckExplorerFavoritesToggle.addEventListener("change", (event) => {
+      state.deckExplorer.favoritesOnly = Boolean(event.target.checked);
+      renderDeckExplorer();
+    });
+  }
+
+  if (elements.deckExplorerGrid) {
+    elements.deckExplorerGrid.addEventListener("click", (event) => {
+      const loadBtn = event.target.closest("button[data-explorer-load]");
+      if (loadBtn) {
+        loadExplorerDeckToBuilder(loadBtn.dataset.explorerLoad || "");
+        return;
+      }
+
+      const favoriteBtn = event.target.closest("button[data-explorer-favorite]");
+      if (favoriteBtn) {
+        toggleExplorerFavorite(favoriteBtn.dataset.explorerFavorite || "");
+        return;
+      }
+
+      const detailBtn = event.target.closest("button[data-explorer-detail]");
+      if (detailBtn) {
+        openDeckDetailModal(detailBtn.dataset.explorerDetail || "");
+      }
+    });
+  }
+
+  if (elements.deckModalCloseBtn) {
+    elements.deckModalCloseBtn.addEventListener("click", () => {
+      closeDeckDetailModal();
+    });
+  }
+
+  if (elements.deckDetailModal) {
+    elements.deckDetailModal.addEventListener("click", (event) => {
+      if (event.target === elements.deckDetailModal) {
+        closeDeckDetailModal();
+      }
+    });
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeDeckDetailModal();
+    }
+  });
+
 }
 
 function initialize() {
@@ -3853,6 +5108,7 @@ function initialize() {
   elements.minLevelInput.value = String(state.minOwnedLevel);
 
   loadLocalCoachState();
+  loadDeckExplorerFavoritesLocal();
 
   elements.datasetSummary.textContent = `${CARD_META.base_count} base cards • ${CARD_META.evolution_count} evolutions • ${CARD_META.hero_count} heroes • ${CARD_META.champion_count} champions`;
 
@@ -3866,8 +5122,17 @@ function initialize() {
   refreshInteractiveMotion();
 
   void refreshSavedProfilesList();
+  void refreshStatusTracker();
+  void refreshDeckExplorer(false);
+  startStatusPolling();
+  window.addEventListener("beforeunload", () => {
+    if (state.statusPollTimer) {
+      clearInterval(state.statusPollTimer);
+    }
+  });
 
-  pushChatMessage("bot", "Deck Coach ready. Ask: what deck should I run, analyze my deck, or list my cards.");
+  renderChatSuggestions();
+  pushChatMessage("bot", "Ollama coach live. Ask naturally: give me safest deck, analyze this deck, what should I upgrade first, or what about at 9k trophies.");
   setStatus("Dataset loaded: 121 cards + evolutions + heroes.");
 }
 

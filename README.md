@@ -1,61 +1,101 @@
-# Clash Royale Deck Forge (Full-Stack)
+# Clash Royale Deck Forge
 
-This project now uses a secure backend route to fetch player data from the **official Clash Royale API** and display profile + owned card levels on the website.
+Local full-stack Clash Royale deck coach web app with secure server routes, player collection fetch, deck coaching, deck explorer, and status tracking.
 
-## What Was Added
+## What is implemented
 
-- Server-side API route: `GET /api/player/<player_tag>`
-- Frontend player tag input + `Fetch My Cards` flow
-- Profile UI (name, tag, trophies, best trophies, arena)
-- Owned cards UI (image, level, max level, count, evo level)
-- Owned card search/filter
-- Loading + safe error states
-- Optional raw response save for local debugging
-- Deck-analysis stub function: `analyzeBestDeck(cards, trophies)`
+- Secure player collection fetch from official Clash Royale API (`CR_API_TOKEN` stays server-side)
+- Owned card + level viewer (with evo level support)
+- Deck builder, analyzer, upgrade advice, comparison, pin/share, and history
+- Ollama-powered conversational deck coach (normal text + live player/card/deck context injection, follow-up memory, typing state, suggestion chips)
+- Deck explorer database with normalized schema and source attribution:
+  - Top player decks (official API)
+  - Popular decks aggregated from top-player snapshot
+  - Trusted reference meta deck snapshot (`deck_reference_data.json`)
+- Live status tracker:
+  - player API health
+  - deck sync health
+  - chatbot heartbeat
+  - recent activity log
+- Premium interactive UI:
+  - cursor-reactive tilt/parallax/spotlight (desktop)
+  - reduced-motion and touch-safe fallbacks
+- Branding-safe fan project treatment (text-only disclaimer, no official logos/assets bundled)
 
-## File Map
+## Project structure
 
-Place/use files in this project directory:
+- `server.py`: Flask API routes and status tracking
+- `ollama_service.py`: Ollama API client wrapper with timeout/error handling
+- `coach_system_prompt.py`: Clash Royale coach system behavior
+- `coach_prompt_builder.py`: prompt/context builder for player/deck/card injection
+- `deck_explorer_service.py`: deck-source fetch + normalization + caching
+- `deck_reference_data.json`: trusted reference deck snapshot + source attribution
+- `app.js`: frontend app logic, explorer rendering, chat routing, deck coaching
+- `ui-motion.js`: reusable motion system
+- `styles.css`: UI styles + motion/desktop/mobile/reduced-motion
+- `index.html`: app layout and panels
+- `cards-data.js`: local card dataset (base/evo/hero metadata)
+- `local_data/profiles.json`: local-first saved profiles/history (runtime)
 
-- `server.py`: backend server + secure Clash API route
-- `requirements.txt`: Python dependencies
-- `.env.example`: environment variables template
-- `index.html`: updated UI (profile + owned cards panel)
-- `app.js`: frontend logic + rendering + deck stub
-- `styles.css`: responsive profile/cards styles
+## API routes
 
-## Environment Variables
+- `GET /api/player/<tag>`
+- `GET /api/decks/explorer?refresh=1`
+- `GET /api/status`
+- `POST /api/status/chatbot-ping`
+- `POST /api/chat/coach`
+- `GET /api/storage/profiles`
+- `GET /api/storage/profile/<tag>`
+- `POST /api/storage/profile/<tag>`
+- `POST /api/storage/history/<tag>`
+- `DELETE /api/storage/history/<tag>`
+- `POST /api/storage/pin/<tag>`
 
-Copy the example file and set your token:
+## Environment setup
 
 ```bash
 cd /Users/mn9xr/clash-royale-deck-builder
 cp .env.example .env
 ```
 
-Edit `.env` and set:
+Set `.env` values (minimum required):
 
 ```env
 CR_API_TOKEN=your_official_clash_royale_api_token_here
-CR_API_TIMEOUT_SECONDS=10
-CR_SAVE_RAW_RESPONSE=0
 PORT=8080
 ```
 
-## Install Dependencies
+Optional values:
+
+- `CR_API_TIMEOUT_SECONDS`
+- `CR_SAVE_RAW_RESPONSE`
+- `DECK_CACHE_SECONDS`
+- `DECK_TOP_PLAYERS_LIMIT`
+- `STATUS_STALE_SECONDS`
+- `APP_BUILD_LABEL`
+- `OLLAMA_BASE_URL`
+- `OLLAMA_MODEL`
+- `OLLAMA_TIMEOUT_SECONDS`
+- `OLLAMA_SESSION_TTL_SECONDS`
+- `OLLAMA_HISTORY_MESSAGES`
+
+## Ollama setup (required for AI coach)
+
+```bash
+# Install Ollama from https://ollama.com (one-time)
+ollama serve
+ollama pull llama3.1:8b
+```
+
+If you use a different model, update `OLLAMA_MODEL` in `.env`.
+
+## Install and run locally
 
 ```bash
 cd /Users/mn9xr/clash-royale-deck-builder
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-## Run Locally
-
-```bash
-cd /Users/mn9xr/clash-royale-deck-builder
-source .venv/bin/activate
 python3 server.py
 ```
 
@@ -63,75 +103,9 @@ Open:
 
 - `http://127.0.0.1:8080`
 
-## Frontend Flow
+## Notes
 
-1. Enter player tag (example: `#ABCD123`)
-2. Click `Fetch My Cards`
-3. Frontend calls backend route `/api/player/<tag>`
-4. Backend calls official API using `CR_API_TOKEN`
-5. Frontend renders profile + owned cards
-
-## Backend Security Notes
-
-- Token is server-side only (`CR_API_TOKEN`)
-- Token is never sent to the browser
-- Player tags are sanitized/validated on server
-- Requests use timeout handling
-- Safe error messages returned to frontend
-
-## Optional Raw Response Debug Save
-
-Set:
-
-```env
-CR_SAVE_RAW_RESPONSE=1
-```
-
-Then each request can save raw JSON to `debug_raw/`.
-
-You can also trigger per request by adding query:
-
-- `/api/player/ABC123?debug=1`
-
-## API Response Shape (to frontend)
-
-```json
-{
-  "player": {
-    "name": "...",
-    "tag": "#...",
-    "trophies": 0,
-    "bestTrophies": 0,
-    "arena": "...",
-    "arenaId": 0
-  },
-  "cards": [
-    {
-      "id": 26000000,
-      "name": "Knight",
-      "level": 14,
-      "maxLevel": 14,
-      "count": 1234,
-      "evolutionLevel": 0,
-      "iconUrl": "https://..."
-    }
-  ],
-  "meta": {
-    "cardCount": 121,
-    "rawSavedPath": null
-  }
-}
-```
-
-Cards are sorted by:
-
-1. highest level first
-2. name ascending
-
-## Deck Builder Stub
-
-`app.js` includes:
-
-- `analyzeBestDeck(cards, trophies)`
-
-This is intentionally a structured stub, ready for future deck-ranking logic.
+- Do not place `CR_API_TOKEN` in frontend JS.
+- Player tags are sanitized server-side and URL encoded for official API calls.
+- Deck explorer still works without token using local trusted references, but top-player sync requires `CR_API_TOKEN`.
+- This is an unofficial fan project and should keep branding/logo usage conservative.

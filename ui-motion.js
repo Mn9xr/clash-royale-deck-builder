@@ -3,7 +3,12 @@ const TILT_SELECTORS = [
   ".deck-slot",
   ".coach-deck-card",
   ".profile-stat",
-  ".stat-card"
+  ".stat-card",
+  ".explorer-deck-card",
+  ".status-tile",
+  ".deck-modal-card",
+  ".catalog-insights",
+  ".insight-metric-card"
 ].join(", ");
 
 const SPOTLIGHT_SELECTORS = [
@@ -16,7 +21,11 @@ const SPOTLIGHT_SELECTORS = [
   ".analysis-wrap",
   ".comparison-wrap",
   ".history-wrap",
-  ".pinned-wrap"
+  ".pinned-wrap",
+  ".status-panel",
+  ".explorer-panel",
+  ".status-activity-wrap",
+  ".deck-modal-card"
 ].join(", ");
 
 const REVEAL_SELECTORS = [
@@ -30,7 +39,10 @@ const REVEAL_SELECTORS = [
   ".analysis-wrap",
   ".comparison-wrap",
   ".history-wrap",
-  ".pinned-wrap"
+  ".pinned-wrap",
+  ".status-panel",
+  ".explorer-panel",
+  ".project-footer"
 ].join(", ");
 
 const STAGGER_GROUPS = [
@@ -38,7 +50,11 @@ const STAGGER_GROUPS = [
   ["#suggestionList", ".suggestion-item"],
   ["#ownedCardsGrid", ".owned-card-item"],
   ["#coachDeckCards", ".coach-deck-card"],
-  ["#historyList", ".history-item"]
+  ["#historyList", ".history-item"],
+  ["#deckExplorerGrid", ".explorer-deck-card"],
+  ["#statusActivityList", ".status-activity-item"],
+  ["#chatSuggestions", ".chat-chip"],
+  ["#catalogQuickFilters", ".quick-filter-chip"]
 ];
 
 const reducedMotionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -227,6 +243,10 @@ function applyStagger(containerSelector, childSelector) {
 
   const children = container.querySelectorAll(childSelector);
   children.forEach((child, idx) => {
+    child.classList.remove("stagger-item");
+    child.style.removeProperty("--stagger-delay");
+    // Force animation restart for dynamic lists.
+    void child.offsetWidth;
     child.classList.add("stagger-item");
     child.style.setProperty("--stagger-delay", `${Math.min(idx * 26, 260)}ms`);
 
@@ -271,7 +291,7 @@ function resetParallax() {
 }
 
 function bindParallaxTargets() {
-  parallaxTargets = Array.from(document.querySelectorAll(".hero, .panel"));
+  parallaxTargets = Array.from(document.querySelectorAll(".hero, .panel, .project-footer"));
   parallaxTargets.forEach((target, index) => {
     target.classList.add("parallax-surface");
     target.dataset.parallaxDepth = String(1 + ((index % 4) * 0.18));

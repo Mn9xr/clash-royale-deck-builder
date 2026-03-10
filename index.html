@@ -15,9 +15,50 @@
         <p class="eyebrow">Clash Royale Deck Coach Platform</p>
         <h1>Deck Forge</h1>
         <p class="hero-copy">
-          Fetch your collection, build level-aware decks, analyze structure, compare options, and track your ladder coaching history.
+          Fetch your collection, build level-aware decks, analyze structure, compare options, explore trusted deck snapshots, and track live app health.
+        </p>
+        <p class="brand-disclaimer">
+          Fan project. Not affiliated with, endorsed, or sponsored by Supercell. Official logos/assets are not used in this UI.
         </p>
       </header>
+
+      <section class="panel status-panel">
+        <div class="panel-head">
+          <h2>Live Status</h2>
+          <div class="deck-actions">
+            <button id="refreshStatusBtn" class="btn ghost" type="button">Refresh Status</button>
+            <button id="syncDeckDbBtn" class="btn ghost" type="button">Sync Deck Sources</button>
+          </div>
+        </div>
+        <p id="statusBuildLabel" class="meta small-meta">Build: local-dev</p>
+
+        <div class="status-tile-grid" id="statusTiles">
+          <article class="status-tile motion-tilt" data-state="stale">
+            <p class="status-kicker">API</p>
+            <strong id="statusApiState">stale</strong>
+            <span id="statusApiTime">No successful fetch yet</span>
+          </article>
+          <article class="status-tile motion-tilt" data-state="stale">
+            <p class="status-kicker">Deck Sync</p>
+            <strong id="statusDeckState">stale</strong>
+            <span id="statusDeckTime">No deck sync yet</span>
+          </article>
+          <article class="status-tile motion-tilt" data-state="stale">
+            <p class="status-kicker">Chatbot</p>
+            <strong id="statusChatState">stale</strong>
+            <span id="statusChatTime">No recent chatbot updates</span>
+          </article>
+        </div>
+
+        <div class="status-activity-wrap">
+          <div class="panel-head">
+            <h3>Recent Activity</h3>
+          </div>
+          <div id="statusActivityList" class="status-activity-list">
+            <p class="meta">No recent activity yet.</p>
+          </div>
+        </div>
+      </section>
 
       <section class="panel catalog-panel">
         <div class="panel-head">
@@ -100,6 +141,59 @@
         <div id="filterBar" class="filter-bar" role="tablist" aria-label="Card filters"></div>
 
         <div id="catalogGrid" class="catalog-grid"></div>
+
+        <div class="catalog-insights" id="catalogInsights">
+          <div class="panel-head">
+            <h3>Collection Insights</h3>
+            <p id="catalogInsightsStatus" class="meta">Load your collection for deeper insights.</p>
+          </div>
+
+          <div class="insight-metrics-grid">
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Owned</span>
+              <strong id="collectionProgressOwned">0 / 121</strong>
+            </article>
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Evos Unlocked</span>
+              <strong id="collectionProgressEvo">0</strong>
+            </article>
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Heroes Unlocked</span>
+              <strong id="collectionProgressHero">0</strong>
+            </article>
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Avg Owned Level</span>
+              <strong id="collectionAvgLevel">0.0</strong>
+            </article>
+          </div>
+
+          <div class="insight-subpanel">
+            <div class="panel-head">
+              <h4>Lowest-Level Deck Links</h4>
+            </div>
+            <ul id="collectionLowLevelList" class="insight-list">
+              <li class="meta">Build or load a deck to see weak links.</li>
+            </ul>
+          </div>
+
+          <div class="insight-subpanel">
+            <div class="panel-head">
+              <h4>Quick Catalog Filters</h4>
+            </div>
+            <div class="catalog-quick-filters" id="catalogQuickFilters">
+              <button type="button" class="quick-filter-chip active" data-catalog-quick="all">All</button>
+              <button type="button" class="quick-filter-chip" data-catalog-quick="underleveled">Underleveled</button>
+              <button type="button" class="quick-filter-chip" data-catalog-quick="deck_core">Only Deck-Core Cards</button>
+              <button type="button" class="quick-filter-chip" data-catalog-quick="highest_level">Highest Level First</button>
+              <button type="button" class="quick-filter-chip" data-catalog-quick="missing_evo">Missing Evolutions</button>
+            </div>
+          </div>
+
+          <div class="insight-actions">
+            <button id="insightUpgradeBtn" class="btn" type="button">Best Upgrade Path</button>
+            <button id="insightSafeDeckBtn" class="btn ghost" type="button">Build Safer Deck From Owned Cards</button>
+          </div>
+        </div>
       </section>
 
       <section class="panel deck-panel">
@@ -214,12 +308,13 @@
             </div>
           </div>
           <div id="chatLog" class="chat-log" aria-live="polite"></div>
+          <div id="chatSuggestions" class="chat-suggestions"></div>
           <form id="chatForm" class="chat-form">
             <input
               id="chatInput"
               class="chat-input"
               type="text"
-              placeholder="Ask: what deck should I run?"
+              placeholder="Ask naturally: is this deck bad, what should I upgrade first, give safer version"
               autocomplete="off"
             />
             <button class="btn" type="submit">Send</button>
@@ -234,7 +329,63 @@
           <textarea id="deckText" readonly aria-label="Deck export"></textarea>
         </div>
       </section>
+
+      <section class="panel explorer-panel">
+        <div class="panel-head">
+          <h2>Deck Explorer</h2>
+          <button id="refreshDeckExplorerBtn" class="btn ghost" type="button">Refresh Explorer</button>
+        </div>
+        <p id="deckExplorerMeta" class="meta small-meta">No explorer data yet.</p>
+
+        <div class="explorer-controls">
+          <input
+            id="deckExplorerSearchInput"
+            class="collection-input"
+            type="search"
+            placeholder="Search by deck name or card..."
+            autocomplete="off"
+            aria-label="Search decks"
+          />
+          <select id="deckExplorerArchetypeSelect" class="collection-input" aria-label="Filter archetype">
+            <option value="all">All archetypes</option>
+          </select>
+          <select id="deckExplorerSourceSelect" class="collection-input" aria-label="Filter source type">
+            <option value="all">All sources</option>
+            <option value="top_player">Top player</option>
+            <option value="popular">Popular</option>
+            <option value="reference_meta">Meta reference</option>
+          </select>
+          <select id="deckExplorerTagSelect" class="collection-input" aria-label="Filter tag">
+            <option value="all">All labels</option>
+          </select>
+          <label class="owned-only-row explorer-favorite-toggle">
+            <input id="deckExplorerFavoritesToggle" type="checkbox" />
+            Favorites only
+          </label>
+        </div>
+
+        <div id="deckExplorerGrid" class="deck-explorer-grid">
+          <p class="meta">Sync deck explorer to load top and popular decks.</p>
+        </div>
+      </section>
+
+      <footer class="project-footer">
+        <p>
+          Deck Forge is an unofficial fan project for coaching and deck analysis. Clash Royale and Supercell names are trademarks of their respective owners.
+        </p>
+        <p class="ai-credit-line">This website was fully made by AI.</p>
+      </footer>
     </main>
+
+    <div id="deckDetailModal" class="deck-modal" aria-hidden="true" role="dialog" aria-label="Deck details">
+      <div class="deck-modal-card motion-tilt spotlight-surface">
+        <div class="panel-head">
+          <h3>Deck Details</h3>
+          <button id="deckModalCloseBtn" class="btn ghost" type="button">Close</button>
+        </div>
+        <div id="deckDetailContent" class="deck-modal-content"></div>
+      </div>
+    </div>
 
     <script type="module" src="app.js"></script>
   </body>

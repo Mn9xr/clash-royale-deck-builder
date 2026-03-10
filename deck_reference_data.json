@@ -1,0 +1,230 @@
+{
+  "sources": [
+    {
+      "name": "Official Clash Royale API",
+      "url": "https://developer.clashroyale.com/#/documentation",
+      "type": "official_api"
+    },
+    {
+      "name": "RoyaleAPI Deck Explorer",
+      "url": "https://royaleapi.com/decks/popular",
+      "type": "trusted_reference"
+    },
+    {
+      "name": "Deck Shop Deck Lists",
+      "url": "https://www.deckshop.pro/deck/list",
+      "type": "trusted_reference"
+    }
+  ],
+  "decks": [
+    {
+      "id": "ref-hog-eq-cycle",
+      "name": "Hog EQ Cycle",
+      "cards": [
+        "Hog Rider",
+        "Earthquake",
+        "The Log",
+        "Firecracker",
+        "Cannon",
+        "Skeletons",
+        "Ice Spirit",
+        "Knight"
+      ],
+      "archetype": "Cycle Control",
+      "source": "RoyaleAPI Deck Explorer",
+      "sourceType": "reference_meta",
+      "tags": [
+        "popular",
+        "meta",
+        "ladder-safe"
+      ],
+      "notes": "Fast cycle pressure deck that punishes heavy structures.",
+      "referenceUrl": "https://royaleapi.com/decks/popular"
+    },
+    {
+      "id": "ref-royal-giant-fisherman",
+      "name": "Royal Giant Fisherman",
+      "cards": [
+        "Royal Giant",
+        "Fisherman",
+        "Hunter",
+        "Fireball",
+        "The Log",
+        "Skeletons",
+        "Electro Spirit",
+        "Goblin Cage"
+      ],
+      "archetype": "Control",
+      "source": "RoyaleAPI Deck Explorer",
+      "sourceType": "reference_meta",
+      "tags": [
+        "popular",
+        "meta",
+        "top player"
+      ],
+      "notes": "Stable ladder control shell with strong anti-air coverage.",
+      "referenceUrl": "https://royaleapi.com/decks/popular"
+    },
+    {
+      "id": "ref-pekka-bridge-spam",
+      "name": "P.E.K.K.A Bridge Spam",
+      "cards": [
+        "P.E.K.K.A",
+        "Battle Ram",
+        "Bandit",
+        "Magic Archer",
+        "Electro Wizard",
+        "Poison",
+        "Zap",
+        "Royal Ghost"
+      ],
+      "archetype": "Counterpush",
+      "source": "Deck Shop Deck Lists",
+      "sourceType": "reference_meta",
+      "tags": [
+        "meta",
+        "strong but flawed"
+      ],
+      "notes": "High pressure punish deck; requires disciplined elixir management.",
+      "referenceUrl": "https://www.deckshop.pro/deck/list"
+    },
+    {
+      "id": "ref-lava-balloon-miner",
+      "name": "Lava Balloon Miner",
+      "cards": [
+        "Lava Hound",
+        "Balloon",
+        "Miner",
+        "Tombstone",
+        "Arrows",
+        "Fireball",
+        "Mega Minion",
+        "Skeleton Dragons"
+      ],
+      "archetype": "Air Beatdown",
+      "source": "RoyaleAPI Deck Explorer",
+      "sourceType": "reference_meta",
+      "tags": [
+        "meta",
+        "risky"
+      ],
+      "notes": "High-ceiling air beatdown option into weak anti-air ladders.",
+      "referenceUrl": "https://royaleapi.com/decks/popular"
+    },
+    {
+      "id": "ref-xbow-cycle",
+      "name": "X-Bow Cycle",
+      "cards": [
+        "X-Bow",
+        "Tesla",
+        "Archers",
+        "Knight",
+        "Skeletons",
+        "Ice Spirit",
+        "Fireball",
+        "The Log"
+      ],
+      "archetype": "Siege Cycle",
+      "source": "Deck Shop Deck Lists",
+      "sourceType": "reference_meta",
+      "tags": [
+        "meta",
+        "ladder-safe"
+      ],
+      "notes": "Precision siege deck that rewards clean defense and cycle control.",
+      "referenceUrl": "https://www.deckshop.pro/deck/list"
+    },
+    {
+      "id": "ref-giant-graveyard",
+      "name": "Giant Graveyard",
+      "cards": [
+        "Giant",
+        "Graveyard",
+        "Baby Dragon",
+        "Bowler",
+        "Barbarian Barrel",
+        "Tornado",
+        "Skeleton Army",
+        "Night Witch"
+      ],
+      "archetype": "Beatdown Control",
+      "source": "Deck Shop Deck Lists",
+      "sourceType": "reference_meta",
+      "tags": [
+        "popular",
+        "off-meta but playable"
+      ],
+      "notes": "Reliable splash-heavy graveyard shell with strong lane control.",
+      "referenceUrl": "https://www.deckshop.pro/deck/list"
+    },
+    {
+      "id": "ref-goblin-drill-control",
+      "name": "Goblin Drill Control",
+      "cards": [
+        "Goblin Drill",
+        "Bomb Tower",
+        "Fire Spirit",
+        "Skeletons",
+        "Poison",
+        "The Log",
+        "Wall Breakers",
+        "Mighty Miner"
+      ],
+      "archetype": "Drill Control",
+      "source": "RoyaleAPI Deck Explorer",
+      "sourceType": "reference_meta",
+      "tags": [
+        "meta",
+        "top player"
+      ],
+      "notes": "Pressure control deck with consistent chip damage routes.",
+      "referenceUrl": "https://royaleapi.com/decks/popular"
+    },
+    {
+      "id": "ref-golem-night-witch",
+      "name": "Golem Night Witch",
+      "cards": [
+        "Golem",
+        "Night Witch",
+        "Baby Dragon",
+        "Tornado",
+        "Lightning",
+        "Bomber",
+        "Barbarian Barrel",
+        "Phoenix"
+      ],
+      "archetype": "Beatdown",
+      "source": "RoyaleAPI Deck Explorer",
+      "sourceType": "reference_meta",
+      "tags": [
+        "popular",
+        "risky"
+      ],
+      "notes": "Classic heavy beatdown deck with strong double elixir spikes.",
+      "referenceUrl": "https://royaleapi.com/decks/popular"
+    },
+    {
+      "id": "ref-mortar-bait",
+      "name": "Mortar Bait",
+      "cards": [
+        "Mortar",
+        "Miner",
+        "Spear Goblins",
+        "Goblin Gang",
+        "Dart Goblin",
+        "Rocket",
+        "The Log",
+        "Rascals"
+      ],
+      "archetype": "Bait Siege",
+      "source": "Deck Shop Deck Lists",
+      "sourceType": "reference_meta",
+      "tags": [
+        "off-meta but playable",
+        "strong but flawed"
+      ],
+      "notes": "Chip pressure and bait overlap deck with high matchup variance.",
+      "referenceUrl": "https://www.deckshop.pro/deck/list"
+    }
+  ]
+}

@@ -2,13 +2,18 @@ import json
 import os
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
 import requests
+from coach_prompt_builder import build_clash_royale_prompt, sanitize_player_context
+from coach_system_prompt import CLASH_ROYALE_COACH_SYSTEM_PROMPT
+from deck_explorer_service import DeckExplorerError, DeckExplorerService
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+from ollama_service import OllamaServiceError, call_ollama_chat
 
 # Load environment variables from .env when running locally.
 load_dotenv()
@@ -23,7 +28,53 @@ STORAGE_FILE = STORAGE_DIR / "profiles.json"
 MAX_HISTORY_ITEMS = 40
 ALLOWED_PLAYSTYLES = {"aggressive", "control", "beatdown", "cycle", "bait", "no_preference"}
 
+STATUS_ACTIVITY_LIMIT = 80
+STATUS_STALE_SECONDS = max(60, int(os.getenv("STATUS_STALE_SECONDS", "900")))
+APP_BUILD_LABEL = os.getenv("APP_BUILD_LABEL", "local-dev")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip() or "http://127.0.0.1:11434"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip() or "llama3.1:8b"
+
+try:
+    OLLAMA_TIMEOUT_SECONDS = max(5.0, float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "45")))
+except ValueError:
+    OLLAMA_TIMEOUT_SECONDS = 45.0
+
+try:
+    OLLAMA_SESSION_TTL_SECONDS = max(300, int(os.getenv("OLLAMA_SESSION_TTL_SECONDS", "7200")))
+except ValueError:
+    OLLAMA_SESSION_TTL_SECONDS = 7200
+
+try:
+    OLLAMA_HISTORY_MESSAGES = max(2, int(os.getenv("OLLAMA_HISTORY_MESSAGES", "8")))
+except ValueError:
+    OLLAMA_HISTORY_MESSAGES = 8
+
+CHAT_SESSION_LIMIT = 200
+
 app = Flask(__name__, static_folder=".", static_url_path="")
+
+
+deck_explorer_service = DeckExplorerService(
+    cache_seconds=int(os.getenv("DECK_CACHE_SECONDS", "900")),
+    timeout_seconds=float(os.getenv("CR_API_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)),
+    top_players_limit=int(os.getenv("DECK_TOP_PLAYERS_LIMIT", "40")),
+)
+
+RUNTIME_STATUS = {
+    "playerFetchState": "stale",
+    "lastSuccessfulPlayerFetch": "",
+    "lastPlayerTag": "",
+    "deckSyncState": "stale",
+    "lastDeckSync": "",
+    "chatbotState": "stale",
+    "lastChatbotUpdate": "",
+    "chatbotLastError": "",
+    "chatbotVersion": f"ollama:{OLLAMA_MODEL}",
+    "buildLabel": APP_BUILD_LABEL,
+}
+
+ACTIVITY_LOG: list[dict] = []
+CHAT_SESSIONS: dict[str, dict] = {}
 
 
 class ApiError(Exception):
@@ -37,6 +88,48 @@ class ApiError(Exception):
 
 def utc_now_iso() -> str:
     return datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
+
+
+def parse_iso(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def derive_status(last_timestamp: str, desired_state: str = "online") -> str:
+    if desired_state == "error":
+        return "error"
+
+    dt = parse_iso(last_timestamp)
+    if not dt:
+        return "stale"
+
+    age_seconds = (datetime.now(tz=timezone.utc) - dt).total_seconds()
+    if age_seconds > STATUS_STALE_SECONDS:
+        return "stale"
+
+    return desired_state
+
+
+def push_activity(component: str, state: str, message: str, detail: str = "") -> None:
+    entry = {
+        "component": str(component or "system")[:40],
+        "state": str(state or "online")[:20],
+        "message": str(message or "")[:220],
+        "detail": str(detail or "")[:700],
+        "createdAt": utc_now_iso(),
+    }
+    ACTIVITY_LOG.insert(0, entry)
+    del ACTIVITY_LOG[STATUS_ACTIVITY_LIMIT:]
 
 
 def sanitize_player_tag(raw_tag: str) -> str:
@@ -238,11 +331,220 @@ def validate_storage_body() -> dict:
     return body
 
 
+def sanitize_chat_session_id(raw_value: str | None) -> str:
+    value = re.sub(r"[^a-zA-Z0-9_-]", "", str(raw_value or "").strip())
+    if 8 <= len(value) <= 64:
+        return value
+    return uuid.uuid4().hex[:20]
+
+
+def prune_chat_sessions() -> None:
+    now = time.time()
+
+    stale_ids = []
+    for session_id, record in CHAT_SESSIONS.items():
+        updated_at = float(record.get("updatedAt") or 0)
+        if not updated_at or (now - updated_at) > OLLAMA_SESSION_TTL_SECONDS:
+            stale_ids.append(session_id)
+
+    for session_id in stale_ids:
+        CHAT_SESSIONS.pop(session_id, None)
+
+    if len(CHAT_SESSIONS) <= CHAT_SESSION_LIMIT:
+        return
+
+    ordered = sorted(
+        CHAT_SESSIONS.items(),
+        key=lambda entry: float((entry[1] or {}).get("updatedAt") or 0),
+        reverse=True,
+    )
+    keep = {item[0] for item in ordered[:CHAT_SESSION_LIMIT]}
+    for session_id in list(CHAT_SESSIONS.keys()):
+        if session_id not in keep:
+            CHAT_SESSIONS.pop(session_id, None)
+
+
+def get_chat_history(session_id: str) -> list[dict]:
+    record = CHAT_SESSIONS.get(session_id)
+    if not isinstance(record, dict):
+        return []
+
+    history = record.get("messages")
+    if not isinstance(history, list):
+        return []
+
+    cleaned: list[dict] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+
+        cleaned.append({"role": role, "content": content[:2000]})
+
+    return cleaned[-OLLAMA_HISTORY_MESSAGES:]
+
+
+def append_chat_history(session_id: str, user_message: str, assistant_message: str) -> None:
+    if not session_id:
+        return
+
+    record = CHAT_SESSIONS.get(session_id)
+    if not isinstance(record, dict):
+        record = {"messages": [], "updatedAt": time.time()}
+        CHAT_SESSIONS[session_id] = record
+
+    messages = record.get("messages")
+    if not isinstance(messages, list):
+        messages = []
+
+    messages.append({"role": "user", "content": str(user_message or "")[:2000]})
+    messages.append({"role": "assistant", "content": str(assistant_message or "")[:2400]})
+
+    max_messages = max(4, OLLAMA_HISTORY_MESSAGES * 2)
+    record["messages"] = messages[-max_messages:]
+    record["updatedAt"] = time.time()
+
+
+def coach_suggestions_for_message(raw_message: str) -> list[str]:
+    text = str(raw_message or "").lower()
+
+    if any(token in text for token in ["upgrade", "priority", "gold"]):
+        return ["what should I upgrade first", "must upgrade now", "don't waste gold yet", "analyze my deck"]
+
+    if any(token in text for token in ["matchup", "counter", "losing"]):
+        return ["good matchups?", "bad matchups?", "double elixir plan", "give me safer version"]
+
+    if any(token in text for token in ["safe", "aggressive", "build", "best deck", "push"]):
+        return ["best main deck", "best safer deck", "best aggressive deck", "load 1"]
+
+    return [
+        "build my best deck",
+        "analyze my deck",
+        "what should I upgrade first",
+        "why am I losing",
+    ]
+
+
+@app.get("/api/status")
+def api_status():
+    """Lightweight product-health status for dashboard UI."""
+    player_state = derive_status(
+        RUNTIME_STATUS.get("lastSuccessfulPlayerFetch", ""),
+        RUNTIME_STATUS.get("playerFetchState", "online"),
+    )
+    deck_state = derive_status(
+        RUNTIME_STATUS.get("lastDeckSync", ""),
+        RUNTIME_STATUS.get("deckSyncState", "online"),
+    )
+    chatbot_state = derive_status(
+        RUNTIME_STATUS.get("lastChatbotUpdate", ""),
+        RUNTIME_STATUS.get("chatbotState", "online"),
+    )
+
+    return jsonify(
+        {
+            "build": {
+                "label": RUNTIME_STATUS.get("buildLabel", APP_BUILD_LABEL),
+                "chatbotVersion": RUNTIME_STATUS.get("chatbotVersion", f"ollama:{OLLAMA_MODEL}"),
+                "timestamp": utc_now_iso(),
+            },
+            "api": {
+                "state": player_state,
+                "lastSuccessfulPlayerFetch": RUNTIME_STATUS.get("lastSuccessfulPlayerFetch", ""),
+                "lastPlayerTag": RUNTIME_STATUS.get("lastPlayerTag", ""),
+            },
+            "decks": {
+                "state": deck_state,
+                "lastDeckSync": RUNTIME_STATUS.get("lastDeckSync", ""),
+                "cacheAgeSeconds": deck_explorer_service.cache_age_seconds(),
+                "lastError": deck_explorer_service.last_error(),
+            },
+            "chatbot": {
+                "state": chatbot_state,
+                "lastUpdate": RUNTIME_STATUS.get("lastChatbotUpdate", ""),
+                "lastError": RUNTIME_STATUS.get("chatbotLastError", ""),
+                "provider": "ollama",
+                "model": OLLAMA_MODEL,
+            },
+            "features": {
+                "playerFetch": player_state,
+                "deckExplorer": deck_state,
+                "chatbot": chatbot_state,
+                "storage": "online",
+            },
+            "activity": ACTIVITY_LOG[:20],
+        }
+    )
+
+
+@app.post("/api/status/chatbot-ping")
+def api_status_chatbot_ping():
+    """Called by frontend chat flow to update last chatbot activity."""
+    body = request.get_json(silent=True) or {}
+    message = str(body.get("message") or "Chatbot response sent.")[:160]
+
+    RUNTIME_STATUS["chatbotState"] = "online"
+    RUNTIME_STATUS["chatbotLastError"] = ""
+    RUNTIME_STATUS["chatbotVersion"] = f"ollama:{OLLAMA_MODEL}"
+    RUNTIME_STATUS["lastChatbotUpdate"] = utc_now_iso()
+    push_activity("chatbot", "online", message)
+
+    return jsonify({"ok": True, "lastChatbotUpdate": RUNTIME_STATUS["lastChatbotUpdate"]})
+
+
+@app.get("/api/decks/explorer")
+def api_decks_explorer():
+    """Deck explorer payload from official API + trusted reference snapshots."""
+    token = os.getenv("CR_API_TOKEN", "").strip()
+    force_refresh = request.args.get("refresh", "0") == "1"
+
+    try:
+        payload = deck_explorer_service.build_deck_database(token or None, force_refresh=force_refresh)
+
+        meta = payload.get("meta") or {}
+        counts = meta.get("counts") or {}
+        total_decks = int(counts.get("total") or len(payload.get("decks") or []))
+        has_official_data = bool(meta.get("hasOfficialData"))
+        errors = meta.get("errors") or []
+
+        state = "online" if (has_official_data or total_decks > 0) else "stale"
+        if errors and not has_official_data:
+            state = "stale" if total_decks > 0 else "error"
+
+        RUNTIME_STATUS["deckSyncState"] = state
+        RUNTIME_STATUS["lastDeckSync"] = str(meta.get("syncedAt") or utc_now_iso())
+
+        detail = f"{total_decks} decks synced"
+        if errors:
+            detail = f"{detail}. {errors[0]}"
+        push_activity("deck_explorer", state, "Deck explorer sync completed.", detail)
+
+        return jsonify(payload)
+
+    except DeckExplorerError as exc:
+        RUNTIME_STATUS["deckSyncState"] = "error"
+        push_activity("deck_explorer", "error", exc.message)
+        return jsonify({"error": exc.message}), exc.status_code
+    except Exception:
+        RUNTIME_STATUS["deckSyncState"] = "error"
+        push_activity("deck_explorer", "error", "Unexpected deck explorer sync error.")
+        return jsonify({"error": "Unexpected server error while syncing deck explorer."}), 500
+
+
 @app.get("/api/player/<player_tag>")
 def api_get_player(player_tag: str):
     """Server API route used by frontend to fetch collection safely."""
     token = os.getenv("CR_API_TOKEN", "").strip()
     if not token:
+        RUNTIME_STATUS["playerFetchState"] = "error"
+        push_activity("player_api", "error", "Player fetch failed: CR_API_TOKEN missing.")
         return jsonify({"error": "Server token missing. Set CR_API_TOKEN."}), 500
 
     try:
@@ -259,6 +561,16 @@ def api_get_player(player_tag: str):
         save_raw_query = request.args.get("debug", "0") == "1"
         saved_path = maybe_save_raw_response(clean_tag, raw_payload, save_raw_env or save_raw_query)
 
+        RUNTIME_STATUS["playerFetchState"] = "online"
+        RUNTIME_STATUS["lastSuccessfulPlayerFetch"] = utc_now_iso()
+        RUNTIME_STATUS["lastPlayerTag"] = profile.get("tag") or f"#{clean_tag}"
+        push_activity(
+            "player_api",
+            "online",
+            "Player collection fetched.",
+            f"{profile.get('name') or 'Unknown'} {profile.get('tag') or f'#{clean_tag}'}",
+        )
+
         return jsonify(
             {
                 "player": profile,
@@ -271,8 +583,16 @@ def api_get_player(player_tag: str):
         )
 
     except ApiError as exc:
+        if exc.status_code >= 500:
+            RUNTIME_STATUS["playerFetchState"] = "error"
+            push_activity("player_api", "error", exc.message)
+        else:
+            RUNTIME_STATUS["playerFetchState"] = "online"
+            push_activity("player_api", "online", f"Player fetch validation: {exc.message}")
         return jsonify({"error": exc.message}), exc.status_code
     except Exception:
+        RUNTIME_STATUS["playerFetchState"] = "error"
+        push_activity("player_api", "error", "Unexpected server error while loading player data.")
         return jsonify({"error": "Unexpected server error while loading player data."}), 500
 
 
@@ -303,10 +623,12 @@ def api_storage_get_profile(player_tag: str):
         if not isinstance(record, dict):
             raise ApiError("Saved profile not found.", 404)
 
+        push_activity("storage", "online", "Saved profile loaded.", f"#{clean_tag}")
         return jsonify({"profile": record})
     except ApiError as exc:
         return jsonify({"error": exc.message}), exc.status_code
     except Exception:
+        push_activity("storage", "error", "Unexpected storage error while loading profile.")
         return jsonify({"error": "Unexpected storage error."}), 500
 
 
@@ -351,10 +673,12 @@ def api_storage_save_profile(player_tag: str):
         record["updatedAt"] = utc_now_iso()
 
         save_storage_payload(payload)
+        push_activity("storage", "online", "Profile saved.", f"#{clean_tag}")
         return jsonify({"ok": True, "profile": record})
     except ApiError as exc:
         return jsonify({"error": exc.message}), exc.status_code
     except Exception:
+        push_activity("storage", "error", "Unexpected storage error while saving profile.")
         return jsonify({"error": "Unexpected storage error."}), 500
 
 
@@ -389,6 +713,7 @@ def api_storage_append_history(player_tag: str):
     except ApiError as exc:
         return jsonify({"error": exc.message}), exc.status_code
     except Exception:
+        push_activity("storage", "error", "Unexpected storage error while appending history.")
         return jsonify({"error": "Unexpected storage error."}), 500
 
 
@@ -402,10 +727,12 @@ def api_storage_clear_history(player_tag: str):
         record["history"] = []
         record["updatedAt"] = utc_now_iso()
         save_storage_payload(payload)
+        push_activity("storage", "online", "Profile history cleared.", f"#{clean_tag}")
         return jsonify({"ok": True})
     except ApiError as exc:
         return jsonify({"error": exc.message}), exc.status_code
     except Exception:
+        push_activity("storage", "error", "Unexpected storage error while clearing history.")
         return jsonify({"error": "Unexpected storage error."}), 500
 
 
@@ -426,11 +753,105 @@ def api_storage_pin_deck(player_tag: str):
         record["updatedAt"] = utc_now_iso()
 
         save_storage_payload(payload)
+        push_activity("storage", "online", "Favorite deck updated.", f"#{clean_tag}")
         return jsonify({"ok": True, "favoriteDeck": record.get("favoriteDeck")})
     except ApiError as exc:
         return jsonify({"error": exc.message}), exc.status_code
     except Exception:
+        push_activity("storage", "error", "Unexpected storage error while pinning deck.")
         return jsonify({"error": "Unexpected storage error."}), 500
+
+
+@app.post("/api/chat/coach")
+def api_chat_coach():
+    """Ollama-backed Clash Royale coach endpoint for conversational chat."""
+    try:
+        body = validate_storage_body()
+
+        message = str(body.get("message") or "").strip()
+        if not message:
+            raise ApiError("Missing chat message.", 400)
+        if len(message) > 2000:
+            raise ApiError("Chat message is too long.", 400)
+
+        raw_context = body.get("context")
+        if raw_context is not None and not isinstance(raw_context, dict):
+            raise ApiError("Invalid chat context payload.", 400)
+
+        session_id = sanitize_chat_session_id(body.get("sessionId"))
+        context = sanitize_player_context(raw_context or {})
+        prompt = build_clash_royale_prompt(context, message)
+
+        prune_chat_sessions()
+        history = get_chat_history(session_id)
+
+        messages = [{"role": "system", "content": CLASH_ROYALE_COACH_SYSTEM_PROMPT}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": prompt})
+
+        result = call_ollama_chat(
+            messages=messages,
+            model=OLLAMA_MODEL,
+            timeout_seconds=OLLAMA_TIMEOUT_SECONDS,
+            base_url=OLLAMA_BASE_URL,
+        )
+
+        reply = str(result.get("content") or "").strip()
+        if not reply:
+            raise OllamaServiceError("Ollama returned an empty reply.", 502)
+
+        append_chat_history(session_id, message, reply)
+
+        model_name = str(result.get("model") or OLLAMA_MODEL)
+        RUNTIME_STATUS["chatbotState"] = "online"
+        RUNTIME_STATUS["chatbotLastError"] = ""
+        RUNTIME_STATUS["chatbotVersion"] = f"ollama:{model_name}"
+        RUNTIME_STATUS["lastChatbotUpdate"] = utc_now_iso()
+
+        player_tag = str(context.get("playerTag") or "Unknown")
+        owned_count = len(context.get("ownedCards") or [])
+        deck_count = len(context.get("currentDeck") or [])
+        push_activity(
+            "chatbot",
+            "online",
+            "Ollama coach reply generated.",
+            f"{player_tag} • deck={deck_count} • owned={owned_count} • model={model_name}",
+        )
+
+        return jsonify(
+            {
+                "reply": reply,
+                "sessionId": session_id,
+                "provider": "ollama",
+                "model": model_name,
+                "suggestions": coach_suggestions_for_message(message),
+                "contextApplied": {
+                    "playerTag": player_tag,
+                    "collectionStatus": context.get("collectionStatus") or "unknown",
+                    "ownedCards": owned_count,
+                    "currentDeckCards": deck_count,
+                },
+            }
+        )
+
+    except ApiError as exc:
+        if exc.status_code >= 500:
+            RUNTIME_STATUS["chatbotState"] = "error"
+            RUNTIME_STATUS["chatbotLastError"] = exc.message
+            push_activity("chatbot", "error", exc.message)
+        return jsonify({"error": exc.message}), exc.status_code
+
+    except OllamaServiceError as exc:
+        RUNTIME_STATUS["chatbotState"] = "error"
+        RUNTIME_STATUS["chatbotLastError"] = exc.message
+        push_activity("chatbot", "error", exc.message)
+        return jsonify({"error": exc.message}), exc.status_code
+
+    except Exception:
+        RUNTIME_STATUS["chatbotState"] = "error"
+        RUNTIME_STATUS["chatbotLastError"] = "Unexpected chatbot server error."
+        push_activity("chatbot", "error", "Unexpected chatbot server error.")
+        return jsonify({"error": "Unexpected server error while generating coach reply."}), 500
 
 
 @app.get("/")
