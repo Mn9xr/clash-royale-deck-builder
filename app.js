@@ -5053,7 +5053,7 @@ function initialize() {
       clearInterval(state.statusPollTimer);
     }
   });
-  pushChatMessage("bot", "Ollama coach live. Ask naturally: give me safest deck, analyze this deck, what should I upgrade first, or what about at 9k trophies.");
+  pushChatMessage("bot", "Ollama coach live. Ask your coach anything: deck fixes, upgrades, matchups, or push strategy.");
   setStatus("Dataset loaded: 121 cards + evolutions + heroes.");
 }
 
