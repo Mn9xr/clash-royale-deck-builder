@@ -412,26 +412,6 @@ def append_chat_history(session_id: str, user_message: str, assistant_message: s
     record["updatedAt"] = time.time()
 
 
-def coach_suggestions_for_message(raw_message: str) -> list[str]:
-    text = str(raw_message or "").lower()
-
-    if any(token in text for token in ["upgrade", "priority", "gold"]):
-        return ["what should I upgrade first", "must upgrade now", "don't waste gold yet", "analyze my deck"]
-
-    if any(token in text for token in ["matchup", "counter", "losing"]):
-        return ["good matchups?", "bad matchups?", "double elixir plan", "give me safer version"]
-
-    if any(token in text for token in ["safe", "aggressive", "build", "best deck", "push"]):
-        return ["best main deck", "best safer deck", "best aggressive deck", "load 1"]
-
-    return [
-        "build my best deck",
-        "analyze my deck",
-        "what should I upgrade first",
-        "why am I losing",
-    ]
-
-
 @app.get("/api/status")
 def api_status():
     """Lightweight product-health status for dashboard UI."""
@@ -824,7 +804,6 @@ def api_chat_coach():
                 "sessionId": session_id,
                 "provider": "ollama",
                 "model": model_name,
-                "suggestions": coach_suggestions_for_message(message),
                 "contextApplied": {
                     "playerTag": player_tag,
                     "collectionStatus": context.get("collectionStatus") or "unknown",

@@ -272,7 +272,6 @@ const elements = {
   collectionProgressOwned: document.getElementById("collectionProgressOwned"),
   insightSafeDeckBtn: document.getElementById("insightSafeDeckBtn"),
   insightUpgradeBtn: document.getElementById("insightUpgradeBtn"),
-  chatSuggestions: document.getElementById("chatSuggestions"),
   deckDetailContent: document.getElementById("deckDetailContent"),
   deckDetailModal: document.getElementById("deckDetailModal"),
   deckExplorerArchetypeSelect: document.getElementById("deckExplorerArchetypeSelect"),
@@ -340,7 +339,6 @@ const state = {
     lastMessageAt: "",
     lastTrophyHint: 0,
     sessionId: "",
-    suggestions: ["build my best deck", "analyze my deck", "what should i upgrade first?", "give me safer version"]
   }
 };
 
@@ -1341,7 +1339,6 @@ function renderCoachDeckCards(options = state.coachRecommendations) {
     elements.coachDeckCards.innerHTML = '<p class="meta">Run a one-tap mode or ask the coach to build decks.</p>';
     updateCoachResultsMeta("No recommendations yet");
     renderComparisonSelectors();
-    renderChatSuggestions();
     refreshInteractiveMotion();
     return;
   }
@@ -4273,19 +4270,6 @@ function buildCoachContextPayload(userMessage = "") {
   return context;
 }
 
-function normalizeSuggestionList(suggestions, fallbackIntent) {
-  if (Array.isArray(suggestions)) {
-    const clean = suggestions
-      .map((item) => String(item || "").trim())
-      .filter(Boolean)
-      .slice(0, 6);
-    if (clean.length) {
-      return clean;
-    }
-  }
-  return suggestionChipsForIntent(fallbackIntent);
-}
-
 async function requestCoachReplyFromApi(message, intentData) {
   const payload = {
     message,
@@ -4318,7 +4302,6 @@ async function requestCoachReplyFromApi(message, intentData) {
 
   return {
     text,
-    suggestions: normalizeSuggestionList(response?.suggestions, intentData.intent),
     source: String(response?.provider || "ollama")
   };
 }
@@ -4391,39 +4374,6 @@ function detectCoachIntent(rawMessage) {
   }
 
   return { intent: "chat", query: q, raw: message, trophyHint };
-}
-
-function suggestionChipsForIntent(intent) {
-  if (intent === "deck_build" || intent === "safe_deck" || intent === "aggressive_deck") {
-    return ["load 1", "give me safer version", "most aggressive deck", "best upgrade path"];
-  }
-  if (intent === "analyze") {
-    return ["biggest weakness?", "best fix", "good matchups", "load 1"];
-  }
-  if (intent === "upgrade") {
-    return ["must upgrade now", "good soon", "don't waste gold yet", "analyze my deck"];
-  }
-  if (intent === "matchup") {
-    return ["what are risky matchups?", "opening plays", "double elixir plan", "safer version"];
-  }
-  return ["build my best deck", "analyze my deck", "what should i upgrade first?", "list my cards"];
-}
-
-function renderChatSuggestions(suggestions = state.chatContext.suggestions) {
-  if (!elements.chatSuggestions) {
-    return;
-  }
-
-  const list = Array.isArray(suggestions) ? suggestions.filter(Boolean).slice(0, 6) : [];
-  if (!list.length) {
-    elements.chatSuggestions.innerHTML = "";
-    return;
-  }
-
-  elements.chatSuggestions.innerHTML = list
-    .map((item) => `<button class="chat-chip" type="button" data-chat-suggestion="${escapeHtml(item)}">${escapeHtml(item)}</button>`)
-    .join("");
-  refreshInteractiveMotion();
 }
 
 function pushTypingIndicator() {
@@ -4575,14 +4525,9 @@ function coachReply(rawMessage) {
   if (trophiesHint > 0) {
     state.chatContext.lastTrophyHint = trophiesHint;
   }
-
-  const suggestions = suggestionChipsForIntent(intent);
-  state.chatContext.suggestions = suggestions;
-
   return {
     intent,
-    text,
-    suggestions
+    text
   };
 }
 
@@ -4599,7 +4544,6 @@ async function sendCoachMessage(text) {
   if (intentData.intent === "load_recommendation") {
     const immediate = coachReply(trimmed);
     pushChatMessage("bot", immediate.text);
-    renderChatSuggestions(immediate.suggestions);
     renderCoachDeckCards(state.coachRecommendations);
     renderComparisonSelectors();
     renderCollectionInsights();
@@ -4613,27 +4557,23 @@ async function sendCoachMessage(text) {
   await new Promise((resolve) => setTimeout(resolve, 220));
 
   let outputText = "";
-  let outputSuggestions = suggestionChipsForIntent(intentData.intent);
   let outputIntent = intentData.intent;
   let usedFallback = false;
 
   try {
     const aiReply = await requestCoachReplyFromApi(trimmed, intentData);
     outputText = aiReply.text;
-    outputSuggestions = aiReply.suggestions;
 
     state.chatContext.lastIntent = outputIntent;
     state.chatContext.lastMessageAt = isoNow();
     if (Number(intentData.trophyHint || 0) > 0) {
       state.chatContext.lastTrophyHint = Number(intentData.trophyHint || 0);
     }
-    state.chatContext.suggestions = outputSuggestions;
   } catch (error) {
     usedFallback = true;
 
     const fallback = coachReply(trimmed);
     outputText = fallback.text;
-    outputSuggestions = fallback.suggestions;
     outputIntent = fallback.intent;
 
     const reason = error instanceof Error ? error.message : "Ollama coach is unavailable.";
@@ -4645,7 +4585,6 @@ async function sendCoachMessage(text) {
   }
 
   pushChatMessage("bot", outputText);
-  renderChatSuggestions(outputSuggestions);
 
   renderCoachDeckCards(state.coachRecommendations);
   renderComparisonSelectors();
@@ -4984,22 +4923,6 @@ function bindEvents() {
       }
     });
   }
-  if (elements.chatSuggestions) {
-    elements.chatSuggestions.addEventListener("click", (event) => {
-      const chip = event.target.closest("button[data-chat-suggestion]");
-      if (!chip) {
-        return;
-      }
-      const text = chip.dataset.chatSuggestion || "";
-      if (!text) {
-        return;
-      }
-      if (elements.chatInput) {
-        elements.chatInput.value = text;
-      }
-      void sendCoachMessage(text);
-    });
-  }
 
   if (elements.refreshStatusBtn) {
     elements.refreshStatusBtn.addEventListener("click", () => {
@@ -5130,8 +5053,6 @@ function initialize() {
       clearInterval(state.statusPollTimer);
     }
   });
-
-  renderChatSuggestions();
   pushChatMessage("bot", "Ollama coach live. Ask naturally: give me safest deck, analyze this deck, what should I upgrade first, or what about at 9k trophies.");
   setStatus("Dataset loaded: 121 cards + evolutions + heroes.");
 }

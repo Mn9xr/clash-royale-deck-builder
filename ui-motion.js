@@ -53,7 +53,6 @@ const STAGGER_GROUPS = [
   ["#historyList", ".history-item"],
   ["#deckExplorerGrid", ".explorer-deck-card"],
   ["#statusActivityList", ".status-activity-item"],
-  ["#chatSuggestions", ".chat-chip"],
   ["#catalogQuickFilters", ".quick-filter-chip"]
 ];
 
