@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clash Royale Deck Forge</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="aurora aurora-a"></div>
+    <div class="aurora aurora-b"></div>
+
+    <main class="app-shell">
+      <header class="hero">
+        <p class="eyebrow">Clash Royale Deck Coach Platform</p>
+        <h1>Deck Forge</h1>
+        <p class="hero-copy">
+          Fetch your collection, build level-aware decks, analyze structure, compare options, and track your ladder coaching history.
+        </p>
+      </header>
+
+      <section class="panel catalog-panel">
+        <div class="panel-head">
+          <h2>Card Catalog</h2>
+          <p id="catalogCount" class="meta">0 cards</p>
+        </div>
+        <p id="datasetSummary" class="meta small-meta"></p>
+
+        <div class="search-wrap">
+          <input
+            id="searchInput"
+            type="search"
+            placeholder="Search cards..."
+            autocomplete="off"
+            aria-label="Search cards"
+          />
+        </div>
+
+        <div class="collection-box">
+          <div class="panel-head collection-head">
+            <h3>My Collection</h3>
+            <p id="ownedSummary" class="meta">Collection not loaded</p>
+          </div>
+          <div class="collection-grid">
+            <input id="playerTagInput" class="collection-input" type="text" placeholder="#PLAYER_TAG" autocomplete="off" />
+            <input id="minLevelInput" class="collection-input" type="number" min="1" max="16" value="1" placeholder="Min level" />
+            <button id="loadCollectionBtn" class="btn">Fetch My Cards</button>
+            <button id="clearCollectionBtn" class="btn ghost">Clear</button>
+          </div>
+
+          <div class="collection-grid extra-grid">
+            <select id="playstyleSelect" class="collection-input" aria-label="Preferred playstyle">
+              <option value="no_preference">Playstyle: No Preference</option>
+              <option value="aggressive">Playstyle: Aggressive</option>
+              <option value="control">Playstyle: Control</option>
+              <option value="beatdown">Playstyle: Beatdown</option>
+              <option value="cycle">Playstyle: Cycle</option>
+              <option value="bait">Playstyle: Bait</option>
+            </select>
+            <select id="savedProfilesSelect" class="collection-input" aria-label="Saved profiles">
+              <option value="">Saved profiles...</option>
+            </select>
+            <button id="saveProfileBtn" class="btn ghost" type="button">Save Profile</button>
+            <button id="loadProfileBtn" class="btn ghost" type="button">Load Saved</button>
+          </div>
+
+          <label class="owned-only-row">
+            <input id="ownedOnlyToggle" type="checkbox" />
+            Show owned cards only
+          </label>
+          <p class="meta small-meta">Uses official Clash Royale API on secure backend routes only. Token stays server-side.</p>
+        </div>
+
+        <div class="profile-box">
+          <div class="panel-head">
+            <h3>Player Profile</h3>
+          </div>
+          <div id="playerProfileContent" class="profile-grid">
+            <p class="meta">No profile loaded</p>
+          </div>
+        </div>
+
+        <div class="owned-cards-box">
+          <div class="panel-head">
+            <h3>Owned Cards</h3>
+            <p id="ownedCardsCount" class="meta">0 cards</p>
+          </div>
+          <input
+            id="ownedCardsSearchInput"
+            class="collection-input"
+            type="search"
+            placeholder="Search owned cards..."
+            autocomplete="off"
+          />
+          <div id="ownedCardsGrid" class="owned-cards-grid">
+            <p class="meta">Load a player tag to view owned cards.</p>
+          </div>
+        </div>
+
+        <div id="filterBar" class="filter-bar" role="tablist" aria-label="Card filters"></div>
+
+        <div id="catalogGrid" class="catalog-grid"></div>
+      </section>
+
+      <section class="panel deck-panel">
+        <div class="panel-head deck-head">
+          <h2>Your Deck</h2>
+          <div class="deck-actions">
+            <button id="randomDeckBtn" class="btn ghost">Randomize</button>
+            <button id="clearDeckBtn" class="btn ghost">Clear</button>
+            <button id="pinCurrentDeckBtn" class="btn ghost" type="button">Pin Current</button>
+          </div>
+        </div>
+
+        <p id="statusMessage" class="status" aria-live="polite"></p>
+
+        <div id="deckSlots" class="deck-slots" aria-label="Deck slots"></div>
+
+        <div class="stats-wrap">
+          <article class="stat-card">
+            <p class="stat-label">Average Elixir</p>
+            <p id="avgElixir" class="stat-value">0.00</p>
+          </article>
+          <article class="stat-card">
+            <p class="stat-label">Cards Selected</p>
+            <p id="deckSize" class="stat-value">0 / 8</p>
+          </article>
+        </div>
+
+        <div class="coverage-wrap">
+          <h3>Deck Health</h3>
+          <ul id="coverageList" class="coverage-list"></ul>
+        </div>
+
+        <div class="suggestion-wrap">
+          <div class="panel-head">
+            <h3>Smart Suggestions</h3>
+            <p class="meta">Based on missing roles</p>
+          </div>
+          <div id="suggestionList" class="suggestion-list"></div>
+        </div>
+
+        <div class="one-tap-wrap">
+          <div class="panel-head">
+            <h3>One-Tap Modes</h3>
+            <p class="meta">Fast actions</p>
+          </div>
+          <div class="one-tap-grid">
+            <button id="actionPushBtn" class="btn" type="button">Best Deck For Pushing</button>
+            <button id="actionSafeBtn" class="btn ghost" type="button">Safest Deck</button>
+            <button id="actionAggroBtn" class="btn ghost" type="button">Most Aggressive Deck</button>
+            <button id="actionUpgradeBtn" class="btn ghost" type="button">Best Upgrade Path</button>
+            <button id="actionAnalyzeBtn" class="btn ghost" type="button">Analyze My Current Deck</button>
+          </div>
+        </div>
+
+        <div class="coach-results-wrap">
+          <div class="panel-head">
+            <h3>Deck Coach Results</h3>
+            <p id="coachResultsMeta" class="meta">No recommendations yet</p>
+          </div>
+          <div id="coachDeckCards" class="coach-deck-grid">
+            <p class="meta">Run a one-tap mode or ask the coach to build decks.</p>
+          </div>
+        </div>
+
+        <div class="analysis-wrap">
+          <div class="panel-head">
+            <h3>Analyzer / Upgrade Output</h3>
+          </div>
+          <pre id="analysisOutput" class="analysis-output">Run analysis or upgrade path to see details.</pre>
+        </div>
+
+        <div class="comparison-wrap">
+          <div class="panel-head">
+            <h3>Deck Comparison</h3>
+          </div>
+          <div class="comparison-controls">
+            <select id="compareDeckA" class="collection-input" aria-label="Compare deck A"></select>
+            <select id="compareDeckB" class="collection-input" aria-label="Compare deck B"></select>
+            <button id="compareDeckBtn" class="btn ghost" type="button">Compare</button>
+          </div>
+          <pre id="comparisonOutput" class="analysis-output">Select two decks to compare score, strengths, and ladder safety.</pre>
+        </div>
+
+        <div class="history-wrap">
+          <div class="panel-head">
+            <h3>Deck History</h3>
+            <button id="clearHistoryBtn" class="btn ghost" type="button">Clear History</button>
+          </div>
+          <div id="historyList" class="history-list">
+            <p class="meta">No history yet.</p>
+          </div>
+        </div>
+
+        <div class="pinned-wrap">
+          <div class="panel-head">
+            <h3>Pinned Deck</h3>
+            <div class="deck-actions">
+              <button id="copySummaryBtn" class="btn ghost" type="button">Copy Summary</button>
+              <button id="generateShareCardBtn" class="btn ghost" type="button">Generate Share Card</button>
+            </div>
+          </div>
+          <pre id="pinnedDeckOutput" class="analysis-output">No pinned deck yet.</pre>
+          <pre id="shareCardOutput" class="analysis-output">Generate a share card from your current or pinned deck.</pre>
+        </div>
+
+        <div class="coach-wrap">
+          <div class="panel-head">
+            <h3>Deck Coach Chat</h3>
+            <div class="deck-actions">
+              <button id="coachCardsBtn" class="btn ghost" type="button">List Cards</button>
+              <button id="coachAnalyzeBtn" class="btn ghost" type="button">Analyze Deck</button>
+            </div>
+          </div>
+          <div id="chatLog" class="chat-log" aria-live="polite"></div>
+          <form id="chatForm" class="chat-form">
+            <input
+              id="chatInput"
+              class="chat-input"
+              type="text"
+              placeholder="Ask: what deck should I run?"
+              autocomplete="off"
+            />
+            <button class="btn" type="submit">Send</button>
+          </form>
+        </div>
+
+        <div class="export-wrap">
+          <div class="panel-head">
+            <h3>Deck Export</h3>
+            <button id="copyDeckBtn" class="btn">Copy</button>
+          </div>
+          <textarea id="deckText" readonly aria-label="Deck export"></textarea>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

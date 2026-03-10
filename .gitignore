@@ -1,0 +1,21 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Python virtual env + caches
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Local app data and debug output
+local_data/
+debug_raw/
+*.log
+
+# macOS/editor noise
+.DS_Store
+.vscode/
+.idea/
