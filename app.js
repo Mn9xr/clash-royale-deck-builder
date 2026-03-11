@@ -280,6 +280,9 @@ const elements = {
   compareDeckBtn: document.getElementById("compareDeckBtn"),
   copySummaryBtn: document.getElementById("copySummaryBtn"),
   coverageList: document.getElementById("coverageList"),
+  coverageScoreBadge: document.getElementById("coverageScoreBadge"),
+  coverageScoreValue: document.getElementById("coverageScoreValue"),
+  coverageSummary: document.getElementById("coverageSummary"),
   datasetSummary: document.getElementById("datasetSummary"),
   deckSize: document.getElementById("deckSize"),
   deckSlots: document.getElementById("deckSlots"),
@@ -2092,84 +2095,127 @@ function renderStats(metrics) {
 }
 
 function coverageItem(title, note, stateClass) {
+  const stateLabel = stateClass === "good" ? "Strong" : stateClass === "warn" ? "Watch" : "Fix";
+  const stateMark = stateClass === "good" ? "+" : stateClass === "warn" ? "!" : "x";
   return `
     <li class="coverage-item ${stateClass}">
-      <span>${title}</span>
-      <span class="coverage-note">${note}</span>
+      <div class="coverage-main">
+        <span class="coverage-icon" aria-hidden="true">${stateMark}</span>
+        <div class="coverage-copy">
+          <span class="coverage-title">${title}</span>
+          <span class="coverage-note">${note}</span>
+        </div>
+      </div>
+      <span class="coverage-state">${stateLabel}</span>
     </li>
   `;
 }
 
+function computeCoverageHealth(entries) {
+  const counts = { good: 0, warn: 0, bad: 0 };
+  let points = 0;
+
+  for (const entry of entries) {
+    if (entry.stateClass === "good") {
+      counts.good += 1;
+      points += 1;
+    } else if (entry.stateClass === "warn") {
+      counts.warn += 1;
+      points += 0.58;
+    } else {
+      counts.bad += 1;
+      points += 0.18;
+    }
+  }
+
+  const score = entries.length ? Math.round((points / entries.length) * 100) : 0;
+  let stateClass = "bad";
+  if (score >= 82) {
+    stateClass = "good";
+  } else if (score >= 64) {
+    stateClass = "warn";
+  } else if (entries.length === 0) {
+    stateClass = "neutral";
+  }
+
+  return { counts, score, stateClass };
+}
+
+function renderCoverageHeader(entries, metrics) {
+  if (!elements.coverageSummary || !elements.coverageScoreBadge || !elements.coverageScoreValue) {
+    return;
+  }
+
+  const { counts, score, stateClass } = computeCoverageHealth(entries);
+  const deckStatus = metrics.size < DECK_SIZE ? `${metrics.size}/${DECK_SIZE} cards selected` : "Full deck loaded";
+
+  elements.coverageSummary.textContent = `${counts.good} strong, ${counts.warn} watch, ${counts.bad} fix • ${deckStatus}`;
+  elements.coverageScoreValue.textContent = `${score}`;
+  elements.coverageScoreBadge.className = `coverage-score-badge ${stateClass}`;
+}
+
 function renderCoverage(metrics) {
-  const items = [];
+  const entries = [];
+  const addCoverage = (title, note, stateClass) => {
+    entries.push({ title, note, stateClass });
+  };
 
   if (metrics.winConditions >= 1) {
-    items.push(coverageItem("Win Condition", `${metrics.winConditions} selected`, "good"));
+    addCoverage("Win Condition", `${metrics.winConditions} selected`, "good");
   } else {
-    items.push(coverageItem("Win Condition", "Add at least one", "bad"));
+    addCoverage("Win Condition", "Add at least one", "bad");
   }
 
   if (metrics.spells === 0) {
-    items.push(coverageItem("Spell Count", "No spells selected", "bad"));
+    addCoverage("Spell Count", "No spells selected", "bad");
   } else if (metrics.spells <= 2) {
-    items.push(coverageItem("Spell Count", `${metrics.spells} selected`, "good"));
+    addCoverage("Spell Count", `${metrics.spells} selected`, "good");
   } else {
-    items.push(coverageItem("Spell Count", `${metrics.spells} selected (heavy)`, "warn"));
+    addCoverage("Spell Count", `${metrics.spells} selected (heavy)`, "warn");
   }
 
   if (metrics.airDefense >= 2) {
-    items.push(coverageItem("Air Defense", `${metrics.airDefense} answers`, "good"));
+    addCoverage("Air Defense", `${metrics.airDefense} answers`, "good");
   } else if (metrics.airDefense === 1) {
-    items.push(coverageItem("Air Defense", "Only 1 answer", "warn"));
+    addCoverage("Air Defense", "Only 1 answer", "warn");
   } else {
-    items.push(coverageItem("Air Defense", "No anti-air", "bad"));
+    addCoverage("Air Defense", "No anti-air", "bad");
   }
 
   if (metrics.cycleCards >= 2) {
-    items.push(coverageItem("Cycle Speed", `${metrics.cycleCards} cheap cards`, "good"));
+    addCoverage("Cycle Speed", `${metrics.cycleCards} cheap cards`, "good");
   } else {
-    items.push(coverageItem("Cycle Speed", "Add 1-2 low-cost cards", "warn"));
+    addCoverage("Cycle Speed", "Add 1-2 low-cost cards", "warn");
   }
 
   if (metrics.buildings >= 1) {
-    items.push(coverageItem("Defensive Building", `${metrics.buildings} selected`, "good"));
+    addCoverage("Defensive Building", `${metrics.buildings} selected`, "good");
   } else {
-    items.push(coverageItem("Defensive Building", "Optional but useful", "warn"));
+    addCoverage("Defensive Building", "Optional but useful", "warn");
   }
 
   if (metrics.size === 0) {
-    items.push(coverageItem("Elixir Curve", "Start adding cards", "warn"));
+    addCoverage("Elixir Curve", "Start adding cards", "warn");
   } else if (metrics.avgElixir >= 2.8 && metrics.avgElixir <= 4.3) {
-    items.push(coverageItem("Elixir Curve", `${metrics.hasVariableElixir ? "~" : ""}${metrics.avgElixir.toFixed(2)} balanced`, "good"));
+    addCoverage("Elixir Curve", `${metrics.hasVariableElixir ? "~" : ""}${metrics.avgElixir.toFixed(2)} balanced`, "good");
   } else if (metrics.avgElixir >= 2.5 && metrics.avgElixir <= 4.8) {
-    items.push(coverageItem("Elixir Curve", `${metrics.hasVariableElixir ? "~" : ""}${metrics.avgElixir.toFixed(2)} can work`, "warn"));
+    addCoverage("Elixir Curve", `${metrics.hasVariableElixir ? "~" : ""}${metrics.avgElixir.toFixed(2)} can work`, "warn");
   } else {
-    items.push(coverageItem("Elixir Curve", `${metrics.hasVariableElixir ? "~" : ""}${metrics.avgElixir.toFixed(2)} is extreme`, "bad"));
+    addCoverage("Elixir Curve", `${metrics.hasVariableElixir ? "~" : ""}${metrics.avgElixir.toFixed(2)} is extreme`, "bad");
   }
 
   if (state.collectionLoaded) {
     if (metrics.size === 0) {
-      items.push(coverageItem("Deck Levels", `Minimum target is L${state.minOwnedLevel}`, "warn"));
+      addCoverage("Deck Levels", `Minimum target is L${state.minOwnedLevel}`, "warn");
     } else if (metrics.minLevel >= state.minOwnedLevel) {
-      items.push(
-        coverageItem(
-          "Deck Levels",
-          `Min L${metrics.minLevel} • Avg L${metrics.avgLevel.toFixed(1)}`,
-          "good"
-        )
-      );
+      addCoverage("Deck Levels", `Min L${metrics.minLevel} • Avg L${metrics.avgLevel.toFixed(1)}`, "good");
     } else {
-      items.push(
-        coverageItem(
-          "Deck Levels",
-          `Min L${metrics.minLevel} below target L${state.minOwnedLevel}`,
-          "bad"
-        )
-      );
+      addCoverage("Deck Levels", `Min L${metrics.minLevel} below target L${state.minOwnedLevel}`, "bad");
     }
   }
 
-  elements.coverageList.innerHTML = items.join("");
+  elements.coverageList.innerHTML = entries.map((entry) => coverageItem(entry.title, entry.note, entry.stateClass)).join("");
+  renderCoverageHeader(entries, metrics);
 }
 
 function buildSuggestionNeedWeights(cards, metrics) {
