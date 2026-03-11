@@ -2,15 +2,17 @@ import hashlib
 import json
 import re
 import time
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
 CLASH_API_BASE = "https://api.clashroyale.com/v1"
 DEFAULT_TOP_PLAYERS_LIMIT = 40
+DEFAULT_TOP_PLAYER_DECKS_LIMIT = 40
+DEFAULT_POPULAR_DECKS_LIMIT = 30
 CARD_EXPORT_PATTERN = re.compile(r"export const CARDS = (\[.*\]);\s*$", re.DOTALL)
 
 WIN_CONDITION_SLUGS = {
@@ -81,6 +83,8 @@ class DeckExplorerService:
         cache_seconds: int = 900,
         timeout_seconds: float = 10.0,
         top_players_limit: int = DEFAULT_TOP_PLAYERS_LIMIT,
+        top_player_decks_limit: int = DEFAULT_TOP_PLAYER_DECKS_LIMIT,
+        popular_decks_limit: int = DEFAULT_POPULAR_DECKS_LIMIT,
         card_data_file: Path | None = None,
         reference_file: Path | None = None,
     ):
@@ -88,6 +92,8 @@ class DeckExplorerService:
         self.cache_seconds = max(60, int(cache_seconds))
         self.timeout_seconds = max(2.0, float(timeout_seconds))
         self.top_players_limit = max(10, min(100, int(top_players_limit)))
+        self.top_player_decks_limit = max(10, min(100, int(top_player_decks_limit)))
+        self.popular_decks_limit = max(8, min(80, int(popular_decks_limit)))
         self.card_data_file = card_data_file or (root / "cards-data.js")
         self.reference_file = reference_file or (root / "deck_reference_data.json")
 
@@ -319,15 +325,15 @@ class DeckExplorerService:
             "updatedAt": created,
         }
 
-    def _fetch_top_players(self, token: str) -> list[dict]:
+    def _api_get(self, token: str, path: str, *, not_found_ok: bool = False) -> dict[str, Any]:
         if not token:
-            return []
+            return {}
 
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
         }
-        url = f"{CLASH_API_BASE}/locations/global/rankings/players?limit={self.top_players_limit}"
+        url = f"{CLASH_API_BASE}{path}"
 
         try:
             response = requests.get(url, headers=headers, timeout=self.timeout_seconds)
@@ -340,6 +346,8 @@ class DeckExplorerService:
             raise DeckExplorerError("Deck explorer token is not authorized.", 502)
         if response.status_code == 429:
             raise DeckExplorerError("Deck explorer is rate limited. Try again soon.", 503)
+        if response.status_code == 404 and not_found_ok:
+            return {}
         if not response.ok:
             raise DeckExplorerError("Deck explorer received an unexpected API response.", 502)
 
@@ -347,25 +355,85 @@ class DeckExplorerService:
             payload = response.json()
         except ValueError as exc:
             raise DeckExplorerError("Deck explorer received invalid JSON.", 502) from exc
+        return payload if isinstance(payload, dict) else {}
 
-        items = payload.get("items") if isinstance(payload, dict) else []
-        return [item for item in items if isinstance(item, dict)]
+    def _fetch_ranked_players(self, token: str) -> list[dict]:
+        if not token:
+            return []
+
+        paths = [
+            f"/locations/global/rankings/players?limit={self.top_players_limit}",
+            f"/locations/global/pathoflegend/players?limit={self.top_players_limit}",
+        ]
+
+        merged: dict[str, dict] = {}
+        for path in paths:
+            payload = self._api_get(token, path)
+            items = payload.get("items") if isinstance(payload, dict) else []
+            if not isinstance(items, list):
+                continue
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                tag = str(item.get("tag") or "").strip()
+                if not tag:
+                    continue
+
+                current = merged.get(tag)
+                if not current:
+                    merged[tag] = item
+                    continue
+
+                current_rank = safe_int(current.get("rank"), 999999)
+                next_rank = safe_int(item.get("rank"), 999999)
+                if next_rank < current_rank:
+                    merged[tag] = item
+
+        players = list(merged.values())
+        players.sort(key=lambda item: safe_int(item.get("rank"), 999999))
+        return players[: self.top_players_limit]
+
+    def _fetch_player_profile(self, token: str, player_tag: str) -> dict[str, Any]:
+        clean_tag = str(player_tag or "").strip()
+        if not clean_tag:
+            return {}
+
+        encoded_tag = quote(clean_tag, safe="")
+        payload = self._api_get(token, f"/players/{encoded_tag}", not_found_ok=True)
+        return payload if isinstance(payload, dict) else {}
 
     def _build_official_decks(self, token: str) -> tuple[list[dict], list[dict]]:
-        players = self._fetch_top_players(token)
+        players = self._fetch_ranked_players(token)
 
         top_player_decks: list[dict] = []
         grouped: dict[str, dict] = {}
+        profile_cache: dict[str, dict[str, Any]] = {}
 
         for player in players:
+            player_tag = str(player.get("tag") or "").strip()
+            player_name = str(player.get("name") or "Top Player").strip() or "Top Player"
+            rank = safe_int(player.get("rank"), 0)
+
             raw_deck = player.get("currentDeck") or []
+            if len(raw_deck) != 8 and player_tag:
+                profile = profile_cache.get(player_tag)
+                if profile is None:
+                    profile = self._fetch_player_profile(token, player_tag)
+                    profile_cache[player_tag] = profile
+
+                if isinstance(profile, dict):
+                    raw_deck = profile.get("currentDeck") or raw_deck
+                    profile_name = str(profile.get("name") or "").strip()
+                    if profile_name:
+                        player_name = profile_name
+
             cards = self._normalize_cards(raw_deck)
             if len(cards) != 8:
                 continue
 
-            player_name = str(player.get("name") or "Top Player").strip() or "Top Player"
-            rank = safe_int(player.get("rank"), 0)
             note = f"Current deck used by top ladder player {player_name}."
+            player_id = slugify(player_tag) or hashlib.sha1(player_name.encode("utf-8")).hexdigest()[:10]
 
             top_player_decks.append(
                 self._build_deck(
@@ -378,6 +446,7 @@ class DeckExplorerService:
                     tags=["top player"],
                     popularity=max(1, rank),
                     reference_url="https://developer.clashroyale.com/#/documentation",
+                    deck_id=f"top-player-{player_id}",
                 )
             )
 
@@ -394,10 +463,13 @@ class DeckExplorerService:
             if player_name not in bucket["players"] and len(bucket["players"]) < 5:
                 bucket["players"].append(player_name)
 
+        top_player_decks.sort(key=lambda item: safe_int(item.get("popularity"), 999999))
+        top_player_decks = top_player_decks[: self.top_player_decks_limit]
+
         grouped_items = sorted(grouped.values(), key=lambda item: item["count"], reverse=True)
 
         popular_decks: list[dict] = []
-        for index, item in enumerate(grouped_items[:12]):
+        for index, item in enumerate(grouped_items[: self.popular_decks_limit]):
             count = safe_int(item.get("count"), 0)
             players_preview = ", ".join(item.get("players") or [])
             note = f"Seen in {count} top-player decks"
@@ -419,7 +491,7 @@ class DeckExplorerService:
                 )
             )
 
-        return top_player_decks[:20], popular_decks
+        return top_player_decks, popular_decks
 
     def _build_reference_meta_decks(self) -> list[dict]:
         meta_decks: list[dict] = []
@@ -468,6 +540,11 @@ class DeckExplorerService:
             except DeckExplorerError as exc:
                 errors.append(exc.message)
                 self._last_error = exc.message
+            else:
+                if not top_player_decks and not popular_decks:
+                    warning = "Official leaderboard returned no usable current decks. Using reference decks only."
+                    errors.append(warning)
+                    self._last_error = warning
         else:
             errors.append("CR_API_TOKEN is missing, so official top-ladder sync is unavailable.")
             self._last_error = "CR_API_TOKEN is missing"

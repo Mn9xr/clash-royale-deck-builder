@@ -58,7 +58,9 @@ app = Flask(__name__, static_folder=".", static_url_path="")
 deck_explorer_service = DeckExplorerService(
     cache_seconds=int(os.getenv("DECK_CACHE_SECONDS", "900")),
     timeout_seconds=float(os.getenv("CR_API_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)),
-    top_players_limit=int(os.getenv("DECK_TOP_PLAYERS_LIMIT", "40")),
+    top_players_limit=int(os.getenv("DECK_TOP_PLAYERS_LIMIT", "80")),
+    top_player_decks_limit=int(os.getenv("DECK_TOP_PLAYER_DECKS_LIMIT", "40")),
+    popular_decks_limit=int(os.getenv("DECK_POPULAR_DECKS_LIMIT", "30")),
 )
 
 RUNTIME_STATUS = {

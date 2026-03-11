@@ -4554,6 +4554,47 @@ function formatTrophyFollowup(trophiesHint) {
   ].join("\n");
 }
 
+function simpleCoachChatFallback(rawMessage) {
+  const q = String(rawMessage || "").toLowerCase();
+
+  if (q.includes("average elixir") || q.includes("avg elixir")) {
+    return "Most ladder-safe decks sit around 3.0 to 4.3 average elixir. Below ~2.9 can lack stopping power, above ~4.5 gets clunky unless your defense is very clean.";
+  }
+
+  if (q.includes("elixir trade") || (q.includes("elixir") && q.includes("trade"))) {
+    return "Good elixir trades are your win condition setup. Spend less than they spent, defend cleanly, then counterpush while they are low on elixir.";
+  }
+
+  if (q.includes("overcommit")) {
+    return "Overcommit means you spent too much elixir in one sequence and cannot defend the punish. Keep 3 to 5 elixir in reserve unless you have a guaranteed tower break.";
+  }
+
+  if ((q.includes("mega knight") || q.includes("mk")) && q.includes("counter")) {
+    return "Best Mega Knight counters are kite + single-target DPS. Pull him with a cheap unit/building, then melt with Mini P.E.K.K.A, Inferno, Prince, or high DPS support.";
+  }
+
+  if (q.includes("how many cards") && q.includes("deck")) {
+    return "A Clash Royale deck always has 8 cards.";
+  }
+
+  if (q.includes("cycle") && (q.includes("faster") || q.includes("fast"))) {
+    return "To cycle faster, lower your average elixir, keep at least 2 cheap cards, and avoid stacking too many 5+ elixir cards in one list.";
+  }
+
+  if (q.includes("spell") && (q.includes("when") || q.includes("use"))) {
+    return "Use spells for reliable value: finish medium-health supports, secure tower chip, and prevent swarm resets. Avoid panic-spelling unless it saves critical damage.";
+  }
+
+  if (q.includes("2v2")) {
+    return "In 2v2, play slower than ladder, avoid doubling the same role as your teammate, and hold at least one defensive answer for surprise win conditions.";
+  }
+
+  return [
+    "I can answer normal Clash Royale questions too.",
+    "Ask things like: what average elixir is safe, how to counter Mega Knight, when to spell cycle, or how to stop overcommitting."
+  ].join(" ");
+}
+
 function coachReply(rawMessage) {
   const intentData = detectCoachIntent(rawMessage);
   const intent = intentData.intent;
@@ -4591,10 +4632,7 @@ function coachReply(rawMessage) {
   } else if (intent === "greeting") {
     text = "I am your ladder deck coach. Ask naturally and I will route it: build deck, analyze deck, matchup guidance, or upgrade priorities.";
   } else {
-    text = [
-      "I can read normal chat now, not only commands.",
-      "Try: build my best deck, give me safer version, is this deck bad, what should I upgrade first, or what about at 9k trophies?"
-    ].join(" ");
+    text = simpleCoachChatFallback(rawMessage);
   }
 
   state.chatContext.lastIntent = intent;

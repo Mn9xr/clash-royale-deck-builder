@@ -215,5 +215,9 @@ def build_clash_royale_prompt(player_context: dict, user_message: str) -> str:
             "",
             "User Request:",
             clean_message,
+            "",
+            "Response Rules For This Request:",
+            "- If this is a general Clash Royale question, answer directly without requiring collection data.",
+            "- Only enforce owned-card restrictions when recommending specific deck/card changes.",
         ]
     )
