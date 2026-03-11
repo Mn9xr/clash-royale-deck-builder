@@ -7,21 +7,64 @@ Project owner and creator: `Mn9xr`.
 ## What is implemented
 
 - Secure player collection fetch from official Clash Royale API (`CR_API_TOKEN` stays server-side)
-- Owned card + level viewer (with evo level support)
-- Deck builder, analyzer, upgrade advice, pin/share, and history
-- Ollama-powered conversational deck coach (normal text + live player/card/deck context injection, follow-up memory, typing state, suggestion chips)
-- Deck explorer database with normalized schema and source attribution:
-  - Top player decks (official API)
-  - Popular decks aggregated from top-player snapshot
-  - Trusted reference meta deck snapshot (`deck_reference_data.json`)
-- Live status tracker:
+- Player profile + owned card tracking with level/evolution awareness
+- Unified card catalog (base/evolution/hero in one list) with:
+  - search bar above filters
+  - role/type filters
+  - quick filters (underleveled, deck-core, highest-level, missing evo)
+- Premium deck builder workflow:
+  - deck slots styled to match catalog cards
+  - card-art backgrounds and variant visuals (hero/evolution FX)
+  - rarity styling (including legendary treatment)
+  - randomize / clear / pin-current actions
+  - deck history and pinned deck summary/share
+- Deck legality rules:
+  - max `1` hero/champion card per deck
+  - max `2` evolution cards per deck
+- Deck Health panel (premium UI) with:
+  - live score badge
+  - strong/watch/fix status chips
+  - role coverage + curve + level checks
+- Battle Log Analytics from recent 1v1 data:
+  - win rate
+  - crown averages
+  - archetype usage
+  - loss patterns
+- Smart Suggestions (non-random):
+  - role-gap scoring
+  - reason text on each suggestion
+  - direct swap suggestions when deck is full
+- One-Tap modes:
+  - Best Deck For Pushing
+  - Safest Deck
+  - Most Aggressive Deck
+  - Best Upgrade Path
+  - Analyze My Current Deck
+- Better upgrade-path logic:
+  - prioritizes highest-impact cards first
+  - excludes maxed cards from upgrade recommendations
+- Ollama-powered deck coach:
+  - live player/card/deck/explorer context injection
+  - follow-up memory and typing-state UX
+  - improved fallback behavior for simple Q&A
+  - Clash Royale arena reference context + owner identity context (`Mn9xr`)
+- Deck Explorer with normalized source attribution and UI controls:
+  - top player decks (official API)
+  - popular decks aggregated from top-ladder snapshot
+  - trusted reference meta decks (`deck_reference_data.json`)
+  - search / archetype / source / label filters
+  - favorites
+  - deck details modal
+  - one-click load into builder
+- Live status tracker with activity feed:
   - player API health
   - deck sync health
   - chatbot heartbeat
   - recent activity log
-- Premium interactive UI:
+- Premium interactive UI system:
   - cursor-reactive tilt/parallax/spotlight (desktop)
   - reduced-motion and touch-safe fallbacks
+  - visibility-safe motion defaults
 - Branding-safe fan project treatment (text-only disclaimer, no official logos/assets bundled)
 
 ## Project structure
@@ -42,7 +85,9 @@ Project owner and creator: `Mn9xr`.
 ## API routes
 
 - `GET /api/player/<tag>`
+- `GET /api/player/<tag>/battlelog`
 - `GET /api/decks/explorer?refresh=1`
+- `GET /api/cards/icons`
 - `GET /api/status`
 - `POST /api/status/chatbot-ping`
 - `POST /api/chat/coach`
