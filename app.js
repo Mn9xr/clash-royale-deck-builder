@@ -23,11 +23,46 @@ const STATUS_REFRESH_INTERVAL_MS = 30000;
 const APP_BUILD_LABEL = "local-dev";
 const COACH_DATA_REFRESH_MAX_AGE_MS = 45 * 60 * 1000;
 const COACH_MIN_REFRESH_GAP_MS = 2 * 60 * 1000;
+const WEBSITE_OWNER_ALIAS = "Mn9xr";
 const CLASH_ROYALE_LIVE_FACTS = Object.freeze({
   verifiedAt: "2026-03-11",
   summary:
     "Official March Update 2026: Trophy Road now extends to 14,000 trophies and adds Arena 29, 30, 31, and 32 at 12,000, 12,500, 13,000, and 13,500 trophies. Heroes unlock starting at Arena 5."
 });
+const CLASH_ROYALE_ARENA_NAMES = Object.freeze([
+  "Arena 1: Goblin Stadium",
+  "Arena 2: Bone Pit",
+  "Arena 3: Barbarian Bowl",
+  "Arena 4: Spell Valley",
+  "Arena 5: Builder's Workshop",
+  "Arena 6: P.E.K.K.A.'s Playhouse",
+  "Arena 7: Royal Arena",
+  "Arena 8: Frozen Peak",
+  "Arena 9: Jungle Arena",
+  "Arena 10: Hog Mountain",
+  "Arena 11: Electro Valley",
+  "Arena 12: Spooky Town",
+  "Arena 13: Rascal's Hideout",
+  "Arena 14: Serenity Peak",
+  "Arena 15: Miner's Mine",
+  "Arena 16: Executioner's Kitchen",
+  "Arena 17: Royal Crypt",
+  "Arena 18: Silent Sanctuary",
+  "Arena 19: Dragon Spa",
+  "Arena 20: Boot Camp",
+  "Arena 21: Clash Fest",
+  "Arena 22: PANCAKES!",
+  "Arena 23: Valkalla",
+  "Arena 24: Legendary Arena",
+  "Arena 25: Lumberlove Cabin",
+  "Arena 26: Royal Road",
+  "Arena 27: Musketeer Street",
+  "Arena 28: Summit of Heroes",
+  "Arena 29: Magic Academy",
+  "Arena 30: Ultimate Clash Pit",
+  "Arena 31: Little Prince's Tavern",
+  "Arena 32: Spirit Square"
+]);
 
 const ROLE_FILTERS = [
   { id: "all", label: "All" },
@@ -4300,6 +4335,10 @@ function buildDeckExplorerCoachSummary() {
   return `${total} explorer decks loaded (${top} top-player, ${popular} popular, ${reference} reference). Last sync: ${syncedAt || "unknown"}.`;
 }
 
+function buildArenaReferenceSummary() {
+  return CLASH_ROYALE_ARENA_NAMES.join(" | ");
+}
+
 async function ensureCoachDataFresh(intentData) {
   const intent = String(intentData?.intent || "");
   if (!shouldAutoRefreshCoachData(intent)) {
@@ -4403,6 +4442,7 @@ function buildCoachContextPayload(userMessage = "") {
     : "";
 
   const context = {
+    siteOwnerAlias: WEBSITE_OWNER_ALIAS,
     playerName: state.playerProfile?.name || state.loadedPlayerName || "Unknown",
     playerTag: state.playerProfile?.tag || state.loadedPlayerTag || (elements.playerTagInput?.value || "Unknown"),
     trophies: Number(state.playerProfile?.trophies || 0),
@@ -4417,6 +4457,7 @@ function buildCoachContextPayload(userMessage = "") {
     extraNotes: analysisSnippet || "Not provided",
     collectionStatus,
     deckExplorerSummary: buildDeckExplorerCoachSummary(),
+    arenaReferenceSummary: buildArenaReferenceSummary(),
     gameFactsVerifiedAt: CLASH_ROYALE_LIVE_FACTS.verifiedAt,
     gameFacts: CLASH_ROYALE_LIVE_FACTS.summary,
     userMessage
@@ -4634,6 +4675,20 @@ function formatTrophyFollowup(trophiesHint) {
 
 function simpleCoachChatFallback(rawMessage) {
   const q = String(rawMessage || "").toLowerCase();
+
+  if (
+    q.includes("who owns") ||
+    q.includes("site owner") ||
+    q.includes("website owner") ||
+    q.includes("who is mn9xr") ||
+    q.includes("who is the daddy")
+  ) {
+    return `${WEBSITE_OWNER_ALIAS} owns this website.`;
+  }
+
+  if (q.includes("arena names") || (q.includes("name") && q.includes("arena"))) {
+    return `Current arena reference: ${CLASH_ROYALE_ARENA_NAMES.join(", ")}.`;
+  }
 
   if (q.includes("arena") && (q.includes("how many") || q.includes("still") || q.includes("only") || q.includes("8"))) {
     return "It is not 8 arenas anymore. Based on the official March 2026 update, Trophy Road reaches Arena 32 and 14,000 trophies, with new Arena 29/30/31/32 at 12,000/12,500/13,000/13,500 trophies.";

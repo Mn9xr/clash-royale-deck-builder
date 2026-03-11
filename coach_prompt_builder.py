@@ -149,6 +149,7 @@ def sanitize_player_context(raw: Any) -> dict:
     payload = raw if isinstance(raw, dict) else {}
 
     return {
+        "siteOwnerAlias": _clip_text(payload.get("siteOwnerAlias"), 80) or "Mn9xr",
         "playerName": _clip_text(payload.get("playerName"), 120) or "Unknown",
         "playerTag": _clip_text(payload.get("playerTag"), 24) or "Unknown",
         "trophies": _safe_int(payload.get("trophies"), 0),
@@ -163,6 +164,7 @@ def sanitize_player_context(raw: Any) -> dict:
         "extraNotes": _clip_text(payload.get("extraNotes"), 800) or "Not provided",
         "collectionStatus": _clip_text(payload.get("collectionStatus"), 120) or "unknown",
         "deckExplorerSummary": _clip_text(payload.get("deckExplorerSummary"), 280) or "Not provided",
+        "arenaReferenceSummary": _clip_text(payload.get("arenaReferenceSummary"), 2800) or "Not provided",
         "gameFactsVerifiedAt": _clip_text(payload.get("gameFactsVerifiedAt"), 40) or "unknown",
         "gameFacts": _clip_text(payload.get("gameFacts"), 1600) or "Not provided",
     }
@@ -193,6 +195,7 @@ def build_clash_royale_prompt(player_context: dict, user_message: str) -> str:
     return "\n".join(
         [
             "Player Context:",
+            f"- Site Owner / Primary User: {context['siteOwnerAlias']}",
             f"- Player Name: {context['playerName']}",
             f"- Player Tag: {context['playerTag']}",
             f"- Trophies: {context['trophies']}",
@@ -200,6 +203,7 @@ def build_clash_royale_prompt(player_context: dict, user_message: str) -> str:
             f"- Preferred Playstyle: {context['preferredPlaystyle']}",
             f"- Collection Status: {context['collectionStatus']}",
             f"- Deck Explorer Snapshot: {context['deckExplorerSummary']}",
+            f"- Arena Reference: {context['arenaReferenceSummary']}",
             "",
             "Current Deck:",
             current_deck,
