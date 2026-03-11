@@ -1621,15 +1621,19 @@ async function runOneTapMode(mode) {
   }
 
   let query = "best deck";
+  let modeTag = "balanced";
   if (mode === "safe") {
     query = "safest deck control";
+    modeTag = "safe";
   } else if (mode === "aggressive") {
     query = "most aggressive deck beatdown";
+    modeTag = "aggressive";
   } else if (mode === "push") {
     query = "best deck for pushing ladder";
+    modeTag = "push";
   }
 
-  const response = formatDeckBuildResponse(query);
+  const response = formatDeckBuildResponse(query, modeTag);
   state.lastDeckBuildText = response;
   setAnalysisOutput(response);
   renderCoachDeckCards(state.coachRecommendations);
@@ -3318,20 +3322,172 @@ function getTemplateRecommendations(query = "") {
   return evaluated.slice(0, 3);
 }
 
-function analyzeBestDeck(cards, trophies) {
-  // Deck logic stub for future expansion.
-  const safeCards = Array.isArray(cards) ? cards : [];
+function normalizeDeckBuildMode(modeOrQuery = "") {
+  const value = String(modeOrQuery || "").toLowerCase();
+
+  if (value.includes("safe") || value.includes("control")) {
+    return "safe";
+  }
+  if (value.includes("aggressive") || value.includes("beatdown") || value.includes("pressure")) {
+    return "aggressive";
+  }
+  if (value.includes("push") || value.includes("ladder")) {
+    return "push";
+  }
+
+  return "balanced";
+}
+
+function scoreDeckSynergy(cards, metrics) {
+  const winPair = identifyWinConditionPair(cards);
+
+  let score = 0;
+  score += metrics.winConditions >= 1 ? 14 : -22;
+  score += metrics.winConditions === 1 ? 6 : 0;
+  score += metrics.winConditions > 2 ? -10 : 0;
+
+  score += metrics.spells >= 1 && metrics.spells <= 2 ? 10 : metrics.spells === 0 ? -14 : -4;
+  score += metrics.airDefense >= 2 ? 8 : metrics.airDefense === 1 ? -5 : -12;
+  score += metrics.buildings >= 1 ? 3 : 0;
+  score += metrics.cycleCards >= 2 ? 3 : 0;
+
+  if (winPair.main && metrics.spells >= 1) {
+    score += 4;
+  }
+  if (winPair.main && metrics.airDefense >= 2) {
+    score += 3;
+  }
+  if (winPair.main && winPair.secondary && winPair.main.slug !== winPair.secondary.slug) {
+    score += 2;
+  }
+
+  return score;
+}
+
+function scoreCurveAndRuleFit(cards, metrics, modeTag = "balanced") {
+  let score = 0;
+
+  const heavyCards = cards.filter((card) => !card.variable_elixir && card.elixir >= 5).length;
+  const ultraHeavyCards = cards.filter((card) => !card.variable_elixir && card.elixir >= 6).length;
+
+  if (modeTag === "safe") {
+    if (metrics.avgElixir <= 4.2) score += 10;
+    else if (metrics.avgElixir <= 4.5) score += 2;
+    else score -= 12;
+  } else if (modeTag === "aggressive") {
+    if (metrics.avgElixir >= 3.6 && metrics.avgElixir <= 5.1) score += 8;
+    else if (metrics.avgElixir < 3.2) score -= 5;
+    else score -= 2;
+  } else {
+    if (metrics.avgElixir >= 2.9 && metrics.avgElixir <= 4.6) score += 8;
+    else score -= 6;
+  }
+
+  if (metrics.winConditions === 0) score -= 20;
+  if (metrics.winConditions > 2) score -= 12;
+  if (metrics.spells === 0) score -= 12;
+  if (metrics.spells > 3) score -= 6;
+  if (metrics.airDefense < 2) score -= 8;
+  if (metrics.cycleCards < 1) score -= 4;
+  if (heavyCards >= 5) score -= 6;
+  if (ultraHeavyCards >= 3) score -= 5;
+
+  return score;
+}
+
+function scoreTrophyMetaWeight(metrics, tags = [], trophies = 0, modeTag = "balanced") {
+  const scoreTags = new Set(tags);
+  const value = Number(trophies ?? 0);
+  let score = 0;
+
+  if (value >= 8000) {
+    if (metrics.avgElixir <= 4.0) score += 6;
+    if (metrics.spells >= 2) score += 3;
+    if (scoreTags.has("cycle") || scoreTags.has("safe") || scoreTags.has("control")) score += 5;
+    if (metrics.avgElixir > 4.6) score -= 8;
+  } else if (value >= 6500) {
+    if (metrics.avgElixir >= 3.1 && metrics.avgElixir <= 4.4) score += 5;
+    if (metrics.airDefense >= 2 && metrics.spells >= 1) score += 4;
+    if (scoreTags.has("balanced") || scoreTags.has("control")) score += 3;
+  } else if (value > 0) {
+    if (metrics.avgElixir >= 3.4 && metrics.avgElixir <= 4.8) score += 3;
+    if (scoreTags.has("aggressive") || scoreTags.has("beatdown") || scoreTags.has("counterpush")) score += 2;
+  }
+
+  if (modeTag === "safe" && (scoreTags.has("safe") || scoreTags.has("control"))) {
+    score += 4;
+  } else if (modeTag === "aggressive" && (scoreTags.has("aggressive") || scoreTags.has("beatdown") || scoreTags.has("counterpush"))) {
+    score += 4;
+  } else if ((modeTag === "push" || modeTag === "balanced") && scoreTags.has("balanced")) {
+    score += 3;
+  }
+
+  return score;
+}
+
+function analyzeBestDeck(cards, trophies, mode = "balanced", query = "") {
+  const safeCards = Array.isArray(cards) ? cards.filter(Boolean) : [];
   const safeTrophies = Number(trophies ?? 0);
+  const modeTag = normalizeDeckBuildMode(mode || query || "balanced");
+
+  if (!state.collectionLoaded) {
+    return {
+      trophies: safeTrophies,
+      mode: modeTag,
+      candidateCount: safeCards.length,
+      recommendedDeck: [],
+      recommendations: [],
+      notes: ["Collection is not loaded yet."]
+    };
+  }
+
+  if (safeCards.length < DECK_SIZE) {
+    return {
+      trophies: safeTrophies,
+      mode: modeTag,
+      candidateCount: safeCards.length,
+      recommendedDeck: [],
+      recommendations: [],
+      notes: [`Need at least ${DECK_SIZE} legal cards at current level filter.`]
+    };
+  }
+
+  const options = buildCoachDeckOptions(query || modeTag);
+  if (!options.length) {
+    return {
+      trophies: safeTrophies,
+      mode: modeTag,
+      candidateCount: safeCards.length,
+      recommendedDeck: [],
+      recommendations: [],
+      notes: ["No legal deck option generated from current card pool."]
+    };
+  }
+
+  const scored = options
+    .map((option) => {
+      const optionCards = Array.isArray(option.cards) ? option.cards : [];
+      const metrics = calculateMetrics(optionCards);
+      const synergyScore = scoreDeckSynergy(optionCards, metrics);
+      const curveRuleScore = scoreCurveAndRuleFit(optionCards, metrics, modeTag);
+      const trophyMetaScore = scoreTrophyMetaWeight(metrics, option.tags || [], safeTrophies, modeTag);
+
+      return {
+        ...option,
+        score: option.score + synergyScore + curveRuleScore + trophyMetaScore
+      };
+    })
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+
+  const best = scored[0];
 
   return {
     trophies: safeTrophies,
+    mode: modeTag,
     candidateCount: safeCards.length,
-    recommendedDeck: [],
-    notes: [
-      "TODO: score card synergy.",
-      "TODO: enforce elixir curve and win-condition rules.",
-      "TODO: weight recommendations by trophy range meta."
-    ]
+    recommendedDeck: best?.cards || [],
+    recommendations: scored,
+    notes: []
   };
 }
 
@@ -3749,6 +3905,21 @@ function explainCurrentDeck() {
   full.push(`Bad matchups: ${matchups.bad.join("; ")}.`);
   full.push(`How to play it better: Early game -> ${plans.early} Mid game -> ${plans.mid} Double elixir -> ${plans.double}`);
 
+  if (state.collectionLoaded) {
+    const bestDeckAnalysis = analyzeBestDeck(usableUniqueCards(), state.playerProfile?.trophies || 0, "push", "best deck for pushing ladder");
+    const topOption = bestDeckAnalysis.recommendations[0];
+    if (topOption?.cards?.length === DECK_SIZE) {
+      const currentSig = coachDeckSignature(cards);
+      const topSig = coachDeckSignature(topOption.cards);
+      if (currentSig !== topSig) {
+        full.push(`Best owned alternative right now: ${topOption.name} (${formatDeckList(topOption.cards)}).`);
+        full.push('If you want the highest ladder stability, use "Best Deck For Pushing" to auto-load it.');
+      } else {
+        full.push("Your current deck already matches your top owned optimized recommendation.");
+      }
+    }
+  }
+
   return [
     "Quick Verdict",
     verdict,
@@ -4125,7 +4296,7 @@ function buildCoachDeckOptions(query = "") {
   return options;
 }
 
-function formatDeckBuildResponse(query = "") {
+function formatDeckBuildResponse(query = "", mode = "balanced") {
   if (!state.collectionLoaded) {
     return [
       "Quick Verdict",
@@ -4142,7 +4313,13 @@ function formatDeckBuildResponse(query = "") {
     ].join("\n");
   }
 
-  const options = buildCoachDeckOptions(query);
+  const analysis = analyzeBestDeck(
+    usableUniqueCards(),
+    state.playerProfile?.trophies || 0,
+    mode || normalizeDeckBuildMode(query),
+    query
+  );
+  const options = analysis.recommendations;
   if (!options.length) {
     return [
       "Quick Verdict",
@@ -4235,6 +4412,7 @@ function formatDeckBuildResponse(query = "") {
     "## Final Verdict",
     `- Highest chance to win now: ${main.name}.`,
     "- Why: it is the cleanest balance of structure, levels, and ladder consistency from your collection.",
+    "- Selection model used: synergy scoring + curve/win-condition enforcement + trophy-range weighting.",
     `- Biggest account/deck-building weakness: ${biggestProblem}`,
     `- Cards/upgrades that improve your account most: ${upgrades.length ? upgrades.join(", ") : "load collection levels to rank upgrades."}.`,
     "",
@@ -5043,11 +5221,12 @@ function primeCoachStateForIntent(intentData) {
   }
 
   if (intentData.intent === "safe_deck") {
-    formatDeckBuildResponse("safest deck control");
+    formatDeckBuildResponse("safest deck control", "safe");
   } else if (intentData.intent === "aggressive_deck") {
-    formatDeckBuildResponse("most aggressive deck beatdown");
+    formatDeckBuildResponse("most aggressive deck beatdown", "aggressive");
   } else if (intentData.intent === "deck_build") {
-    formatDeckBuildResponse(intentData.query || "best deck");
+    const query = intentData.query || "best deck";
+    formatDeckBuildResponse(query, normalizeDeckBuildMode(query));
   }
 }
 
@@ -5292,11 +5471,12 @@ function coachReply(rawMessage) {
   } else if (intent === "upgrade") {
     text = formatUpgradeAdviceResponse();
   } else if (intent === "safe_deck") {
-    text = formatDeckBuildResponse("safest deck control");
+    text = formatDeckBuildResponse("safest deck control", "safe");
   } else if (intent === "aggressive_deck") {
-    text = formatDeckBuildResponse("most aggressive deck beatdown");
+    text = formatDeckBuildResponse("most aggressive deck beatdown", "aggressive");
   } else if (intent === "deck_build") {
-    text = formatDeckBuildResponse(intentData.query || "best deck");
+    const buildQuery = intentData.query || "best deck";
+    text = formatDeckBuildResponse(buildQuery, normalizeDeckBuildMode(buildQuery));
   } else if (intent === "matchup") {
     text = formatMatchupAnswer();
   } else if (intent === "trophy_followup") {
