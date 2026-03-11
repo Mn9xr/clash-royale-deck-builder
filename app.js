@@ -2,6 +2,8 @@ import { CARDS, CARD_META } from "./cards-data.js";
 import { initializeInteractiveMotion, refreshInteractiveMotion } from "./ui-motion.js";
 
 const DECK_SIZE = 8;
+const MAX_HERO_CHAMPION_CARDS = 1;
+const MAX_EVOLUTION_CARDS = 2;
 const VARIABLE_ELIXIR_ESTIMATE = 4;
 const COLLECTION_API_BASE = "/api";
 const BATTLELOG_API_BASE = "/api/player";
@@ -322,6 +324,7 @@ const elements = {
   collectionProgressOwned: document.getElementById("collectionProgressOwned"),
   insightSafeDeckBtn: document.getElementById("insightSafeDeckBtn"),
   insightUpgradeBtn: document.getElementById("insightUpgradeBtn"),
+  jumpToExplorerBtn: document.getElementById("jumpToExplorerBtn"),
   deckDetailContent: document.getElementById("deckDetailContent"),
   deckDetailModal: document.getElementById("deckDetailModal"),
   deckExplorerArchetypeSelect: document.getElementById("deckExplorerArchetypeSelect"),
@@ -679,6 +682,42 @@ function currentCleanTag() {
 
 function isCompleteDeck(cards) {
   return Array.isArray(cards) && cards.length === DECK_SIZE;
+}
+
+function isHeroOrChampionCard(card) {
+  return Boolean(card) && (card.variant === "hero" || card.rarity === "Champion");
+}
+
+function isEvolutionCard(card) {
+  return Boolean(card) && card.variant === "evolution";
+}
+
+function countDeckSpecialCards(cards = []) {
+  const safeCards = Array.isArray(cards) ? cards : [];
+  return {
+    heroChampionCount: safeCards.filter((card) => isHeroOrChampionCard(card)).length,
+    evolutionCount: safeCards.filter((card) => isEvolutionCard(card)).length
+  };
+}
+
+function validateDeckSpecialCaps(cards = []) {
+  const counts = countDeckSpecialCards(cards);
+
+  if (counts.heroChampionCount > MAX_HERO_CHAMPION_CARDS) {
+    return {
+      legal: false,
+      message: `Deck cap reached: max ${MAX_HERO_CHAMPION_CARDS} Hero/Champion card.`
+    };
+  }
+
+  if (counts.evolutionCount > MAX_EVOLUTION_CARDS) {
+    return {
+      legal: false,
+      message: `Deck cap reached: max ${MAX_EVOLUTION_CARDS} Evolution cards.`
+    };
+  }
+
+  return { legal: true, message: "" };
 }
 
 function buildDeckSnapshotFromCards(cards, name = "Deck", source = "manual") {
@@ -2782,6 +2821,12 @@ function addCard(cardId) {
     return;
   }
 
+  const capValidation = validateDeckSpecialCaps([...deckCards(), card]);
+  if (!capValidation.legal) {
+    setStatus(capValidation.message, "warn");
+    return;
+  }
+
   state.deck.push(card.id);
   renderAll();
 }
@@ -2825,6 +2870,14 @@ function swapCardAt(index, cardId) {
     return existingCard?.slug === nextCard.slug;
   })) {
     setStatus(`${nextCard.name} is already in your deck.`, "warn");
+    return;
+  }
+
+  const simulated = deckCards();
+  simulated[index] = nextCard;
+  const capValidation = validateDeckSpecialCaps(simulated);
+  if (!capValidation.legal) {
+    setStatus(capValidation.message, "warn");
     return;
   }
 
@@ -2891,8 +2944,10 @@ function generateRandomDeck() {
     }
 
     const metrics = calculateMetrics(picked);
+    const capValidation = validateDeckSpecialCaps(picked);
 
     if (
+      capValidation.legal &&
       metrics.winConditions >= 1 &&
       metrics.spells >= 1 &&
       metrics.airDefense >= 2 &&
@@ -2915,6 +2970,11 @@ function generateRandomDeck() {
     if (fallback.length === DECK_SIZE) {
       break;
     }
+  }
+
+  const fallbackCards = fallback.map((id) => getCard(id)).filter(Boolean);
+  if (!validateDeckSpecialCaps(fallbackCards).legal) {
+    return [];
   }
 
   return fallback;
@@ -3225,9 +3285,10 @@ function buildDeckFromTemplate(template) {
 
 function evaluateTemplate(template) {
   const built = buildDeckFromTemplate(template);
+  const capValidation = validateDeckSpecialCaps(built.cards);
   const levels = built.cards.map((card) => cardLevel(card)).filter((v) => v > 0);
   const avgLevel = levels.length ? levels.reduce((a, b) => a + b, 0) / levels.length : 0;
-  const score = built.cards.length * 10 + avgLevel;
+  const score = built.cards.length * 10 + avgLevel + (capValidation.legal ? 0 : -30);
 
   return {
     ...template,
@@ -3235,7 +3296,7 @@ function evaluateTemplate(template) {
     missing: built.missing,
     avgLevel,
     score,
-    ready: built.cards.length === DECK_SIZE
+    ready: built.cards.length === DECK_SIZE && capValidation.legal
   };
 }
 
@@ -3816,7 +3877,11 @@ function buildDeckFromOwnedPool(mode = "balanced") {
     if (!card || used.has(card.slug) || picked.length >= DECK_SIZE) {
       return false;
     }
-    const nextMetrics = calculateMetrics([...picked, card]);
+    const nextCards = [...picked, card];
+    if (!validateDeckSpecialCaps(nextCards).legal) {
+      return false;
+    }
+    const nextMetrics = calculateMetrics(nextCards);
     if (nextMetrics.winConditions > 2) {
       return false;
     }
@@ -3876,11 +3941,13 @@ function buildDeckFromOwnedPool(mode = "balanced") {
     const fallback = [...pool]
       .sort((a, b) => cardLevel(b) - cardLevel(a) || a.name.localeCompare(b.name))
       .filter((card) => !picked.some((entry) => entry.slug === card.slug))
+      .filter((card) => validateDeckSpecialCaps([...picked, card]).legal)
       .slice(0, DECK_SIZE - picked.length);
     picked.push(...fallback);
   }
 
-  return picked.slice(0, DECK_SIZE);
+  const finalDeck = picked.slice(0, DECK_SIZE);
+  return validateDeckSpecialCaps(finalDeck).legal ? finalDeck : [];
 }
 
 function deckQualityScore(cards, modeTag = "balanced") {
@@ -3907,13 +3974,14 @@ function deckQualityScore(cards, modeTag = "balanced") {
 
 function createCoachOptionFromCards(name, cards, note, tags = []) {
   const metrics = calculateMetrics(cards);
+  const capValidation = validateDeckSpecialCaps(cards);
   return {
     name,
     tags,
     cards,
     note,
     missing: [],
-    ready: cards.length === DECK_SIZE,
+    ready: cards.length === DECK_SIZE && capValidation.legal,
     avgLevel: metrics.avgLevel,
     score: deckQualityScore(cards, tags[0] || "balanced")
   };
@@ -3925,6 +3993,9 @@ function uniqueDeckOptions(options = []) {
 
   for (const option of options) {
     if (!option || !Array.isArray(option.cards) || option.cards.length !== DECK_SIZE) {
+      continue;
+    }
+    if (!validateDeckSpecialCaps(option.cards).legal) {
       continue;
     }
     const sig = coachDeckSignature(option.cards);
@@ -3941,6 +4012,9 @@ function uniqueDeckOptions(options = []) {
 function getSingleLegalDeckOption() {
   const pool = usableUniqueCards();
   if (pool.length !== DECK_SIZE) {
+    return null;
+  }
+  if (!validateDeckSpecialCaps(pool).legal) {
     return null;
   }
   return createCoachOptionFromCards(
@@ -4639,6 +4713,12 @@ function loadExplorerDeckToBuilder(deckId) {
 
   if (resolvedCards.length < DECK_SIZE) {
     setStatus("Some cards from this explorer deck do not exist in your local dataset yet.", "warn");
+    return;
+  }
+
+  const capValidation = validateDeckSpecialCaps(resolvedCards.slice(0, DECK_SIZE));
+  if (!capValidation.legal) {
+    setStatus(`Explorer deck is not legal for current cap rules. ${capValidation.message}`, "warn");
     return;
   }
 
@@ -5532,6 +5612,15 @@ function bindEvents() {
         return;
       }
       setPinnedDeckFromCards(cards, "Pinned Current Deck", "current");
+    });
+  }
+
+  if (elements.jumpToExplorerBtn) {
+    elements.jumpToExplorerBtn.addEventListener("click", () => {
+      const section = document.getElementById("deckExplorerSection");
+      if (section) {
+        section.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     });
   }
 

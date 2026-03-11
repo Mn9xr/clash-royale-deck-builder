@@ -2,6 +2,8 @@
 
 Local full-stack Clash Royale deck coach web app with secure server routes, player collection fetch, deck coaching, deck explorer, and status tracking.
 
+Project owner and creator: `Mn9xr`.
+
 ## What is implemented
 
 - Secure player collection fetch from official Clash Royale API (`CR_API_TOKEN` stays server-side)
