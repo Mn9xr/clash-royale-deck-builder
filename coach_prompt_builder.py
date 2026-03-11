@@ -162,6 +162,9 @@ def sanitize_player_context(raw: Any) -> dict:
         "struggleDecks": payload.get("struggleDecks"),
         "extraNotes": _clip_text(payload.get("extraNotes"), 800) or "Not provided",
         "collectionStatus": _clip_text(payload.get("collectionStatus"), 120) or "unknown",
+        "deckExplorerSummary": _clip_text(payload.get("deckExplorerSummary"), 280) or "Not provided",
+        "gameFactsVerifiedAt": _clip_text(payload.get("gameFactsVerifiedAt"), 40) or "unknown",
+        "gameFacts": _clip_text(payload.get("gameFacts"), 1600) or "Not provided",
     }
 
 
@@ -196,6 +199,7 @@ def build_clash_royale_prompt(player_context: dict, user_message: str) -> str:
             f"- Arena: {context['arena']}",
             f"- Preferred Playstyle: {context['preferredPlaystyle']}",
             f"- Collection Status: {context['collectionStatus']}",
+            f"- Deck Explorer Snapshot: {context['deckExplorerSummary']}",
             "",
             "Current Deck:",
             current_deck,
@@ -212,6 +216,10 @@ def build_clash_royale_prompt(player_context: dict, user_message: str) -> str:
             pinned_deck,
             f"- Decks User Struggles Against: {struggle_decks}",
             f"- Notes: {context['extraNotes']}",
+            "",
+            "Live Game Snapshot (Most Recent Verified):",
+            f"- Verified At: {context['gameFactsVerifiedAt']}",
+            f"- Facts: {context['gameFacts']}",
             "",
             "User Request:",
             clean_message,

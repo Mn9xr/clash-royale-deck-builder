@@ -21,6 +21,13 @@ const COACH_CHAT_API = "/api/chat/coach";
 const CHAT_SESSION_STORAGE_KEY = "deckforge_chat_session_id";
 const STATUS_REFRESH_INTERVAL_MS = 30000;
 const APP_BUILD_LABEL = "local-dev";
+const COACH_DATA_REFRESH_MAX_AGE_MS = 45 * 60 * 1000;
+const COACH_MIN_REFRESH_GAP_MS = 2 * 60 * 1000;
+const CLASH_ROYALE_LIVE_FACTS = Object.freeze({
+  verifiedAt: "2026-03-11",
+  summary:
+    "Official March Update 2026: Trophy Road now extends to 14,000 trophies and adds Arena 29, 30, 31, and 32 at 12,000, 12,500, 13,000, and 13,500 trophies. Heroes unlock starting at Arena 5."
+});
 
 const ROLE_FILTERS = [
   { id: "all", label: "All" },
@@ -338,6 +345,9 @@ const state = {
     sessionId: "",
   }
 };
+
+let coachDataRefreshPromise = null;
+let lastCoachDataRefreshAttemptAt = 0;
 
 function normalizeName(value) {
   return String(value || "")
@@ -4251,6 +4261,71 @@ async function refreshDeckExplorer(forceRefresh = false) {
   }
 }
 
+function parseIsoToMs(value) {
+  const date = new Date(String(value || ""));
+  const epoch = date.getTime();
+  return Number.isFinite(epoch) ? epoch : 0;
+}
+
+function shouldAutoRefreshCoachData(intent = "") {
+  const skipIntents = new Set(["load_recommendation", "greeting"]);
+  if (skipIntents.has(String(intent || ""))) {
+    return false;
+  }
+
+  const meta = state.deckExplorer.meta || {};
+  const syncedAtMs = parseIsoToMs(meta.syncedAt || "");
+  const hasDecks = Array.isArray(state.deckExplorer.decks) && state.deckExplorer.decks.length > 0;
+
+  if (!hasDecks || !syncedAtMs) {
+    return true;
+  }
+
+  return Date.now() - syncedAtMs > COACH_DATA_REFRESH_MAX_AGE_MS;
+}
+
+function buildDeckExplorerCoachSummary() {
+  const meta = state.deckExplorer.meta || {};
+  const counts = meta.counts || {};
+  const total = Number(counts.total || state.deckExplorer.decks.length || 0);
+  const top = Number(counts.topPlayer || 0);
+  const popular = Number(counts.popular || 0);
+  const reference = Number(counts.meta || 0);
+  const syncedAt = String(meta.syncedAt || "").trim();
+
+  if (total <= 0) {
+    return "Deck explorer has no synced decks yet.";
+  }
+
+  return `${total} explorer decks loaded (${top} top-player, ${popular} popular, ${reference} reference). Last sync: ${syncedAt || "unknown"}.`;
+}
+
+async function ensureCoachDataFresh(intentData) {
+  const intent = String(intentData?.intent || "");
+  if (!shouldAutoRefreshCoachData(intent)) {
+    return;
+  }
+
+  const now = Date.now();
+  if (!coachDataRefreshPromise && now - lastCoachDataRefreshAttemptAt < COACH_MIN_REFRESH_GAP_MS) {
+    return;
+  }
+
+  if (!coachDataRefreshPromise) {
+    lastCoachDataRefreshAttemptAt = now;
+    setStatus("Refreshing live Clash Royale deck data for coach...", "info");
+    coachDataRefreshPromise = (async () => {
+      try {
+        await refreshDeckExplorer(true);
+      } finally {
+        coachDataRefreshPromise = null;
+      }
+    })();
+  }
+
+  await coachDataRefreshPromise;
+}
+
 function parseTrophyHint(message) {
   const text = String(message || "").toLowerCase();
   const direct = text.match(/(?:at|around|near)\s*(\d{3,5})\s*(?:troph|cup)?/);
@@ -4341,6 +4416,9 @@ function buildCoachContextPayload(userMessage = "") {
     struggleDecks: [],
     extraNotes: analysisSnippet || "Not provided",
     collectionStatus,
+    deckExplorerSummary: buildDeckExplorerCoachSummary(),
+    gameFactsVerifiedAt: CLASH_ROYALE_LIVE_FACTS.verifiedAt,
+    gameFacts: CLASH_ROYALE_LIVE_FACTS.summary,
     userMessage
   };
 
@@ -4557,6 +4635,10 @@ function formatTrophyFollowup(trophiesHint) {
 function simpleCoachChatFallback(rawMessage) {
   const q = String(rawMessage || "").toLowerCase();
 
+  if (q.includes("arena") && (q.includes("how many") || q.includes("still") || q.includes("only") || q.includes("8"))) {
+    return "It is not 8 arenas anymore. Based on the official March 2026 update, Trophy Road reaches Arena 32 and 14,000 trophies, with new Arena 29/30/31/32 at 12,000/12,500/13,000/13,500 trophies.";
+  }
+
   if (q.includes("average elixir") || q.includes("avg elixir")) {
     return "Most ladder-safe decks sit around 3.0 to 4.3 average elixir. Below ~2.9 can lack stopping power, above ~4.5 gets clunky unless your defense is very clean.";
   }
@@ -4667,6 +4749,7 @@ async function sendCoachMessage(text) {
   }
 
   primeCoachStateForIntent(intentData);
+  await ensureCoachDataFresh(intentData);
 
   const typingRow = pushTypingIndicator();
   await new Promise((resolve) => setTimeout(resolve, 220));
