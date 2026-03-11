@@ -74,7 +74,6 @@
           </div>
           <div class="collection-grid">
             <input id="playerTagInput" class="collection-input" type="text" placeholder="#PLAYER_TAG" autocomplete="off" />
-            <input id="minLevelInput" class="collection-input" type="number" min="1" max="16" value="1" placeholder="Min level" />
             <button id="loadCollectionBtn" class="btn">Fetch My Cards</button>
             <button id="clearCollectionBtn" class="btn ghost">Clear</button>
           </div>
@@ -88,11 +87,6 @@
               <option value="cycle">Playstyle: Cycle</option>
               <option value="bait">Playstyle: Bait</option>
             </select>
-            <select id="savedProfilesSelect" class="collection-input" aria-label="Saved profiles">
-              <option value="">Saved profiles...</option>
-            </select>
-            <button id="saveProfileBtn" class="btn ghost" type="button">Save Profile</button>
-            <button id="loadProfileBtn" class="btn ghost" type="button">Load Saved</button>
           </div>
 
           <label class="owned-only-row">
@@ -209,6 +203,49 @@
           <ul id="coverageList" class="coverage-list"></ul>
         </div>
 
+        <div class="battle-analytics-wrap">
+          <div class="panel-head">
+            <h3>Battle Log Analytics</h3>
+            <button id="refreshBattleAnalyticsBtn" class="btn ghost" type="button">Refresh</button>
+          </div>
+          <p id="battleAnalyticsStatus" class="meta small-meta">Load your collection to analyze recent battles.</p>
+
+          <div class="insight-metrics-grid">
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Recent 1v1</span>
+              <strong id="battleSummaryCount">0</strong>
+            </article>
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Win Rate</span>
+              <strong id="battleSummaryWinRate">0%</strong>
+            </article>
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Avg Crowns For</span>
+              <strong id="battleSummaryCrownsFor">0.00</strong>
+            </article>
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Avg Crowns Against</span>
+              <strong id="battleSummaryCrownsAgainst">0.00</strong>
+            </article>
+          </div>
+
+          <div class="coach-mini-grid">
+            <article class="coach-mini-card">
+              <h5>My Archetypes</h5>
+              <ul id="battleMyArchetypesList">
+                <li class="meta">No battle data yet.</li>
+              </ul>
+            </article>
+
+            <article class="coach-mini-card">
+              <h5>Loss Patterns</h5>
+              <ul id="battleLossPatternsList">
+                <li class="meta">No battle data yet.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+
         <div class="suggestion-wrap">
           <div class="panel-head">
             <h3>Smart Suggestions</h3>
@@ -229,18 +266,6 @@
             <button id="actionUpgradeBtn" class="btn ghost" type="button">Best Upgrade Path</button>
             <button id="actionAnalyzeBtn" class="btn ghost" type="button">Analyze My Current Deck</button>
           </div>
-        </div>
-
-        <div class="comparison-wrap">
-          <div class="panel-head">
-            <h3>Deck Comparison</h3>
-          </div>
-          <div class="comparison-controls">
-            <select id="compareDeckA" class="collection-input" aria-label="Compare deck A"></select>
-            <select id="compareDeckB" class="collection-input" aria-label="Compare deck B"></select>
-            <button id="compareDeckBtn" class="btn ghost" type="button">Compare</button>
-          </div>
-          <pre id="comparisonOutput" class="analysis-output">Select two decks to compare score, strengths, and ladder safety.</pre>
         </div>
 
         <div class="history-wrap">
@@ -331,7 +356,7 @@
         <p>
           Deck Forge is an unofficial fan project for coaching and deck analysis. Clash Royale and Supercell names are trademarks of their respective owners.
         </p>
-        <p class="ai-credit-line">This website was fully made by AI.</p>
+        <p class="ai-credit-line">Creator credit: Mn9xr. If you use this as a template, keep this attribution.</p>
       </footer>
     </main>
 

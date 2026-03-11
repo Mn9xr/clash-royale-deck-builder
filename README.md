@@ -6,7 +6,7 @@ Local full-stack Clash Royale deck coach web app with secure server routes, play
 
 - Secure player collection fetch from official Clash Royale API (`CR_API_TOKEN` stays server-side)
 - Owned card + level viewer (with evo level support)
-- Deck builder, analyzer, upgrade advice, comparison, pin/share, and history
+- Deck builder, analyzer, upgrade advice, pin/share, and history
 - Ollama-powered conversational deck coach (normal text + live player/card/deck context injection, follow-up memory, typing state, suggestion chips)
 - Deck explorer database with normalized schema and source attribution:
   - Top player decks (official API)
@@ -35,7 +35,7 @@ Local full-stack Clash Royale deck coach web app with secure server routes, play
 - `styles.css`: UI styles + motion/desktop/mobile/reduced-motion
 - `index.html`: app layout and panels
 - `cards-data.js`: local card dataset (base/evo/hero metadata)
-- `local_data/profiles.json`: local-first saved profiles/history (runtime)
+- `local_data/profiles.json`: local runtime storage (history/profile data)
 
 ## API routes
 
@@ -102,6 +102,12 @@ python3 server.py
 Open:
 
 - `http://127.0.0.1:8080`
+
+## Attribution and template use
+
+- If you reuse this project as a template/base, keep credit to `Mn9xr`.
+- Keep attribution in both project docs (README or equivalent) and a visible app/site location (footer or About page).
+- See [`LICENSE`](LICENSE) for the attribution requirement text.
 
 ## Notes
 

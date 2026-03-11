@@ -22,6 +22,32 @@ CLASH_API_BASE = "https://api.clashroyale.com/v1"
 DISPLAY_LEVEL_CAP = 16
 DEFAULT_TIMEOUT_SECONDS = 10.0
 TAG_PATTERN = re.compile(r"^[A-Z0-9]{3,15}$")
+SLUG_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
+
+WIN_CONDITION_KEYS = {
+    "balloon",
+    "battleram",
+    "elixirgolem",
+    "goblinbarrel",
+    "goblindrill",
+    "goblingiant",
+    "golem",
+    "graveyard",
+    "giant",
+    "hogrider",
+    "lavahound",
+    "miner",
+    "mortar",
+    "ramrider",
+    "royalgiant",
+    "royalhogs",
+    "skeletonbarrel",
+    "wallbreakers",
+    "xbow",
+}
+
+BAIT_HINT_KEYS = {"goblinbarrel", "princess", "dartgoblin", "rascals"}
+BEATDOWN_HINT_KEYS = {"golem", "lavahound", "electrogiant", "elixirgolem", "giant", "goblingiant"}
 
 STORAGE_DIR = Path(__file__).resolve().parent / "local_data"
 STORAGE_FILE = STORAGE_DIR / "profiles.json"
@@ -152,6 +178,42 @@ def sanitize_player_tag(raw_tag: str) -> str:
     return tag
 
 
+def slug_key(value: str) -> str:
+    return SLUG_KEY_PATTERN.sub("", str(value or "").strip().lower())
+
+
+def infer_battle_archetype(card_names: list[str]) -> str:
+    keys = {slug_key(name) for name in card_names if slug_key(name)}
+    if not keys:
+        return "Unknown"
+
+    if "xbow" in keys or "mortar" in keys:
+        return "Siege"
+    if "graveyard" in keys:
+        return "Graveyard Control"
+    if keys & BAIT_HINT_KEYS and ("goblinbarrel" in keys or "skeletonbarrel" in keys):
+        return "Bait"
+    if "hogrider" in keys and ("earthquake" in keys or "cannon" in keys):
+        return "Hog EQ Cycle"
+    if "hogrider" in keys:
+        return "Hog Cycle"
+    if "royalgiant" in keys:
+        return "RG Control"
+    if "goblindrill" in keys:
+        return "Drill Control"
+    if "miner" in keys and "wallbreakers" in keys:
+        return "Miner WB"
+    if keys & BEATDOWN_HINT_KEYS:
+        return "Beatdown"
+
+    win_count = len([key for key in keys if key in WIN_CONDITION_KEYS])
+    if win_count == 0:
+        return "Control"
+    if win_count >= 2:
+        return "Dual Win-Condition"
+    return "Midrange"
+
+
 def normalized_card_level(level_value, max_level_value) -> int:
     """Convert Clash API card level into in-game display level (1-16)."""
     level = int(level_value or 0)
@@ -198,6 +260,201 @@ def fetch_player_data(clean_tag: str, token: str) -> dict:
         return response.json()
     except ValueError as exc:
         raise ApiError("Clash Royale API returned invalid JSON.", 502) from exc
+
+
+def fetch_player_battle_log(clean_tag: str, token: str) -> list[dict]:
+    """Fetch recent battle log from official Clash Royale API."""
+    timeout = float(os.getenv("CR_API_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
+    encoded_tag = quote(f"#{clean_tag}", safe="")
+    url = f"{CLASH_API_BASE}/players/{encoded_tag}/battlelog"
+
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=timeout)
+    except requests.Timeout as exc:
+        raise ApiError("Clash Royale battle log request timed out.", 504) from exc
+    except requests.RequestException as exc:
+        raise ApiError("Could not reach Clash Royale API.", 502) from exc
+
+    if response.status_code == 404:
+        raise ApiError("Player tag not found.", 404)
+    if response.status_code in (401, 403):
+        raise ApiError("Server cannot access Clash Royale API with current token.", 502)
+    if response.status_code == 429:
+        raise ApiError("Clash Royale API rate limit reached. Try again soon.", 503)
+    if not response.ok:
+        raise ApiError("Clash Royale API returned an unexpected response.", 502)
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise ApiError("Clash Royale API returned invalid JSON.", 502) from exc
+
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    return []
+
+
+def build_battle_log_analytics(raw_battles: list[dict], clean_tag: str) -> dict:
+    """Normalize recent battles and compute lightweight performance analytics."""
+    analyzed: list[dict] = []
+    skipped = 0
+
+    my_archetypes: dict[str, dict] = {}
+    opp_archetypes: dict[str, dict] = {}
+    loss_archetype_counter: dict[str, int] = {}
+
+    wins = losses = draws = 0
+    crowns_for_total = crowns_against_total = 0
+    heavy_losses = shutout_losses = 0
+
+    for battle in raw_battles:
+        team = battle.get("team") if isinstance(battle.get("team"), list) else []
+        opponent = battle.get("opponent") if isinstance(battle.get("opponent"), list) else []
+        if len(team) != 1 or len(opponent) != 1:
+            skipped += 1
+            continue
+
+        me = team[0] if isinstance(team[0], dict) else {}
+        opp = opponent[0] if isinstance(opponent[0], dict) else {}
+        if not me or not opp:
+            skipped += 1
+            continue
+
+        my_cards = me.get("cards") if isinstance(me.get("cards"), list) else []
+        opp_cards = opp.get("cards") if isinstance(opp.get("cards"), list) else []
+        if len(my_cards) < 8 or len(opp_cards) < 8:
+            skipped += 1
+            continue
+
+        my_card_names = [str(card.get("name") or "").strip() for card in my_cards if isinstance(card, dict)]
+        opp_card_names = [str(card.get("name") or "").strip() for card in opp_cards if isinstance(card, dict)]
+        if len(my_card_names) < 8 or len(opp_card_names) < 8:
+            skipped += 1
+            continue
+
+        crowns_for = int(me.get("crowns") or 0)
+        crowns_against = int(opp.get("crowns") or 0)
+        if crowns_for > crowns_against:
+            result = "win"
+            wins += 1
+        elif crowns_for < crowns_against:
+            result = "loss"
+            losses += 1
+        else:
+            result = "draw"
+            draws += 1
+
+        crowns_for_total += crowns_for
+        crowns_against_total += crowns_against
+
+        my_archetype = infer_battle_archetype(my_card_names)
+        opp_archetype = infer_battle_archetype(opp_card_names)
+
+        my_bucket = my_archetypes.setdefault(my_archetype, {"count": 0, "wins": 0, "losses": 0, "draws": 0})
+        my_bucket["count"] += 1
+        if result == "win":
+            my_bucket["wins"] += 1
+        elif result == "loss":
+            my_bucket["losses"] += 1
+        else:
+            my_bucket["draws"] += 1
+
+        opp_bucket = opp_archetypes.setdefault(opp_archetype, {"count": 0, "wins": 0, "losses": 0, "draws": 0})
+        opp_bucket["count"] += 1
+        if result == "win":
+            opp_bucket["losses"] += 1
+        elif result == "loss":
+            opp_bucket["wins"] += 1
+            loss_archetype_counter[opp_archetype] = int(loss_archetype_counter.get(opp_archetype) or 0) + 1
+        else:
+            opp_bucket["draws"] += 1
+
+        if result == "loss":
+            if (crowns_against - crowns_for) >= 2:
+                heavy_losses += 1
+            if crowns_for == 0 and crowns_against > 0:
+                shutout_losses += 1
+
+        analyzed.append(
+            {
+                "battleTime": str(battle.get("battleTime") or ""),
+                "gameMode": str((battle.get("gameMode") or {}).get("name") or "Unknown"),
+                "result": result,
+                "crownsFor": crowns_for,
+                "crownsAgainst": crowns_against,
+                "myArchetype": my_archetype,
+                "oppArchetype": opp_archetype,
+                "oppName": str(opp.get("name") or "Opponent"),
+            }
+        )
+
+    total = len(analyzed)
+    win_rate = round((wins * 100.0 / total), 1) if total else 0.0
+    avg_crowns_for = round(crowns_for_total / total, 2) if total else 0.0
+    avg_crowns_against = round(crowns_against_total / total, 2) if total else 0.0
+    recent_form = "".join({"win": "W", "loss": "L", "draw": "D"}.get(item.get("result"), "-") for item in analyzed[:10])
+
+    def fold_archetypes(source: dict[str, dict]) -> list[dict]:
+        rows: list[dict] = []
+        for name, bucket in source.items():
+            count = int(bucket.get("count") or 0)
+            if count <= 0:
+                continue
+            wins_local = int(bucket.get("wins") or 0)
+            losses_local = int(bucket.get("losses") or 0)
+            draws_local = int(bucket.get("draws") or 0)
+            rows.append(
+                {
+                    "name": name,
+                    "count": count,
+                    "wins": wins_local,
+                    "losses": losses_local,
+                    "draws": draws_local,
+                    "winRate": round((wins_local * 100.0 / count), 1),
+                }
+            )
+        rows.sort(key=lambda item: (-item["count"], item["name"]))
+        return rows[:8]
+
+    loss_patterns: list[dict] = []
+    for name, count in sorted(loss_archetype_counter.items(), key=lambda item: (-item[1], item[0]))[:5]:
+        share = round((count * 100.0 / losses), 1) if losses else 0.0
+        loss_patterns.append({"label": f"Losing most to {name}", "count": count, "share": share})
+
+    if heavy_losses > 0:
+        share = round((heavy_losses * 100.0 / losses), 1) if losses else 0.0
+        loss_patterns.append({"label": "Heavy losses (2+ crown gap)", "count": heavy_losses, "share": share})
+    if shutout_losses > 0:
+        share = round((shutout_losses * 100.0 / losses), 1) if losses else 0.0
+        loss_patterns.append({"label": "Shutout losses (0 crowns)", "count": shutout_losses, "share": share})
+
+    return {
+        "playerTag": f"#{clean_tag}",
+        "generatedAt": utc_now_iso(),
+        "meta": {
+            "sourceCount": len(raw_battles),
+            "analyzedCount": total,
+            "skippedCount": skipped,
+        },
+        "summary": {
+            "wins": wins,
+            "losses": losses,
+            "draws": draws,
+            "winRate": win_rate,
+            "avgCrownsFor": avg_crowns_for,
+            "avgCrownsAgainst": avg_crowns_against,
+            "recentForm": recent_form,
+        },
+        "myArchetypes": fold_archetypes(my_archetypes),
+        "opponentArchetypes": fold_archetypes(opp_archetypes),
+        "lossPatterns": loss_patterns[:6],
+        "recentBattles": analyzed[:12],
+    }
 
 
 def fetch_card_catalog(token: str) -> list[dict]:
@@ -578,6 +835,46 @@ def api_decks_explorer():
         RUNTIME_STATUS["deckSyncState"] = "error"
         push_activity("deck_explorer", "error", "Unexpected deck explorer sync error.")
         return jsonify({"error": "Unexpected server error while syncing deck explorer."}), 500
+
+
+@app.get("/api/player/<player_tag>/battlelog")
+def api_get_player_battlelog(player_tag: str):
+    """Fetch player battle log and return analytics for recent 1v1 battles."""
+    token = os.getenv("CR_API_TOKEN", "").strip()
+    if not token:
+        RUNTIME_STATUS["playerFetchState"] = "error"
+        push_activity("battlelog_api", "error", "Battle log fetch failed: CR_API_TOKEN missing.")
+        return jsonify({"error": "Server token missing. Set CR_API_TOKEN."}), 500
+
+    try:
+        clean_tag = sanitize_player_tag(player_tag)
+        raw_battles = fetch_player_battle_log(clean_tag, token)
+        analytics = build_battle_log_analytics(raw_battles, clean_tag)
+
+        RUNTIME_STATUS["playerFetchState"] = "online"
+        RUNTIME_STATUS["lastSuccessfulPlayerFetch"] = utc_now_iso()
+        RUNTIME_STATUS["lastPlayerTag"] = f"#{clean_tag}"
+        push_activity(
+            "battlelog_api",
+            "online",
+            "Battle log analytics generated.",
+            f"#{clean_tag} • {analytics.get('meta', {}).get('analyzedCount', 0)} analyzed",
+        )
+
+        return jsonify(analytics)
+
+    except ApiError as exc:
+        if exc.status_code >= 500:
+            RUNTIME_STATUS["playerFetchState"] = "error"
+            push_activity("battlelog_api", "error", exc.message)
+        else:
+            RUNTIME_STATUS["playerFetchState"] = "online"
+            push_activity("battlelog_api", "online", f"Battle log validation: {exc.message}")
+        return jsonify({"error": exc.message}), exc.status_code
+    except Exception:
+        RUNTIME_STATUS["playerFetchState"] = "error"
+        push_activity("battlelog_api", "error", "Unexpected server error while loading battle log.")
+        return jsonify({"error": "Unexpected server error while loading battle log."}), 500
 
 
 @app.get("/api/player/<player_tag>")
