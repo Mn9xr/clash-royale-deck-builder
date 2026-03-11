@@ -442,6 +442,7 @@ const EVO_VARIANT_SLUGS = new Set(ENRICHED_CARDS.filter((card) => card.variant =
 const HERO_VARIANT_BY_SLUG = new Map(ENRICHED_CARDS.filter((card) => card.variant === "hero").map((card) => [card.slug, card]));
 const EVO_VARIANT_BY_SLUG = new Map(ENRICHED_CARDS.filter((card) => card.variant === "evolution").map((card) => [card.slug, card]));
 const BASE_RARITY_BY_SLUG = new Map(BASE_CARDS.map((card) => [card.slug, card.rarity]));
+const BASE_CARD_BY_SLUG = new Map(BASE_CARDS.map((card) => [card.slug, card]));
 const cardById = new Map(ENRICHED_CARDS.map((card) => [card.id, card]));
 const baseNameToSlug = new Map();
 
@@ -486,6 +487,22 @@ function formatElixir(card) {
 
 function numericElixir(card) {
   return card.variable_elixir ? VARIABLE_ELIXIR_ESTIMATE : card.elixir;
+}
+
+function compareCardsByElixirDesc(a, b) {
+  const elixirDiff = numericElixir(b) - numericElixir(a);
+  if (elixirDiff !== 0) {
+    return elixirDiff;
+  }
+
+  const nameDiff = String(a.name || "").localeCompare(String(b.name || ""));
+  if (nameDiff !== 0) {
+    return nameDiff;
+  }
+
+  const variantA = VARIANT_ORDER[a.variant] ?? 99;
+  const variantB = VARIANT_ORDER[b.variant] ?? 99;
+  return variantA - variantB;
 }
 
 function cardLevel(card) {
@@ -1607,11 +1624,11 @@ function applyCatalogQuickFilter(cards) {
   const mode = state.catalogQuickFilter;
 
   if (mode === "all") {
-    return cards;
+    return [...cards].sort(compareCardsByElixirDesc);
   }
 
   if (mode === "highest_level") {
-    return [...cards].sort((a, b) => cardLevel(b) - cardLevel(a) || a.name.localeCompare(b.name));
+    return [...cards].sort((a, b) => cardLevel(b) - cardLevel(a) || compareCardsByElixirDesc(a, b));
   }
 
   if (mode === "underleveled") {
@@ -1624,7 +1641,7 @@ function applyCatalogQuickFilter(cards) {
 
     return cards
       .filter((card) => cardOwned(card) && cardLevel(card) > 0 && cardLevel(card) <= threshold)
-      .sort((a, b) => cardLevel(a) - cardLevel(b) || a.name.localeCompare(b.name));
+      .sort((a, b) => cardLevel(a) - cardLevel(b) || compareCardsByElixirDesc(a, b));
   }
 
   if (mode === "deck_core") {
@@ -1635,7 +1652,7 @@ function applyCatalogQuickFilter(cards) {
 
     return cards
       .filter((card) => coreSlugs.has(card.slug))
-      .sort((a, b) => cardLevel(b) - cardLevel(a) || a.name.localeCompare(b.name));
+      .sort((a, b) => cardLevel(b) - cardLevel(a) || compareCardsByElixirDesc(a, b));
   }
 
   if (mode === "missing_evo") {
@@ -1653,10 +1670,10 @@ function applyCatalogQuickFilter(cards) {
         }
         return EVO_VARIANT_SLUGS.has(card.slug) && (state.evolutionLevels.get(card.slug) ?? 0) <= 0;
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort(compareCardsByElixirDesc);
   }
 
-  return cards;
+  return [...cards].sort(compareCardsByElixirDesc);
 }
 
 function visibleCards() {
@@ -2226,6 +2243,8 @@ function buildOwnedCardDisplayEntries(baseCards = []) {
     const baseName = String(card?.name || "").trim();
     const slug = apiNameToSlug(baseName);
     const baseRarity = slug ? BASE_RARITY_BY_SLUG.get(slug) || "Unknown" : "Unknown";
+    const baseMeta = slug ? BASE_CARD_BY_SLUG.get(slug) || null : null;
+    const elixir = baseMeta ? numericElixir(baseMeta) : 0;
 
     entries.push({
       ...card,
@@ -2234,11 +2253,12 @@ function buildOwnedCardDisplayEntries(baseCards = []) {
       rarity: baseRarity,
       variant: "base",
       hasEvoVariant: Boolean(slug && EVO_VARIANT_SLUGS.has(slug)),
-      hasHeroVariant: Boolean(slug && HERO_VARIANT_SLUGS.has(slug))
+      hasHeroVariant: Boolean(slug && HERO_VARIANT_SLUGS.has(slug)),
+      elixir
     });
   }
 
-  return entries.sort((a, b) => Number(b.level ?? 0) - Number(a.level ?? 0) || a.name.localeCompare(b.name));
+  return entries.sort((a, b) => Number(b.elixir ?? 0) - Number(a.elixir ?? 0) || Number(b.level ?? 0) - Number(a.level ?? 0) || a.name.localeCompare(b.name));
 }
 
 function renderOwnedCards() {
@@ -3206,13 +3226,19 @@ function listOwnedCardsWithLevels() {
   const entries = [...state.ownedCards]
     .map((card) => ({
       name: card.name,
+      slug: apiNameToSlug(card.name),
       level: Number(card.level ?? 0),
       evoLevel: Number(card.evolutionLevel ?? 0),
       hasEvoVariant: Boolean(card.hasEvoVariant),
       hasHeroVariant: Boolean(card.hasHeroVariant)
     }))
+    .map((entry) => {
+      const baseMeta = entry.slug ? BASE_CARD_BY_SLUG.get(entry.slug) || null : null;
+      const elixir = baseMeta ? numericElixir(baseMeta) : 0;
+      return { ...entry, elixir };
+    })
     .filter((entry) => entry.level > 0)
-    .sort((a, b) => b.level - a.level || a.name.localeCompare(b.name));
+    .sort((a, b) => b.elixir - a.elixir || b.level - a.level || a.name.localeCompare(b.name));
 
   if (!entries.length) {
     return "No owned cards found in the loaded profile.";
@@ -3227,7 +3253,7 @@ function listOwnedCardsWithLevels() {
     if (entry.hasHeroVariant) tagNotes.push("Hero");
     const variantNote = tagNotes.length ? `, Tags: ${tagNotes.join("/")}` : "";
     const evoNote = entry.evoLevel > 0 ? `, Evo ${entry.evoLevel}` : "";
-    lines.push(`${index + 1}. ${entry.name} - L${entry.level}${variantNote}${evoNote}`);
+    lines.push(`${index + 1}. ${entry.name} - ${entry.elixir} elixir - L${entry.level}${variantNote}${evoNote}`);
   });
 
   return lines.join("\n");
