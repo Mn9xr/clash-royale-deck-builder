@@ -214,7 +214,6 @@ const elements = {
   actionPushBtn: document.getElementById("actionPushBtn"),
   actionSafeBtn: document.getElementById("actionSafeBtn"),
   actionUpgradeBtn: document.getElementById("actionUpgradeBtn"),
-  analysisOutput: document.getElementById("analysisOutput"),
   avgElixir: document.getElementById("avgElixir"),
   chatForm: document.getElementById("chatForm"),
   chatInput: document.getElementById("chatInput"),
@@ -224,19 +223,15 @@ const elements = {
   clearHistoryBtn: document.getElementById("clearHistoryBtn"),
   coachAnalyzeBtn: document.getElementById("coachAnalyzeBtn"),
   coachCardsBtn: document.getElementById("coachCardsBtn"),
-  coachDeckCards: document.getElementById("coachDeckCards"),
-  coachResultsMeta: document.getElementById("coachResultsMeta"),
   comparisonOutput: document.getElementById("comparisonOutput"),
   compareDeckA: document.getElementById("compareDeckA"),
   compareDeckB: document.getElementById("compareDeckB"),
   compareDeckBtn: document.getElementById("compareDeckBtn"),
-  copyDeckBtn: document.getElementById("copyDeckBtn"),
   copySummaryBtn: document.getElementById("copySummaryBtn"),
   coverageList: document.getElementById("coverageList"),
   datasetSummary: document.getElementById("datasetSummary"),
   deckSize: document.getElementById("deckSize"),
   deckSlots: document.getElementById("deckSlots"),
-  deckText: document.getElementById("deckText"),
   filterBar: document.getElementById("filterBar"),
   generateShareCardBtn: document.getElementById("generateShareCardBtn"),
   historyList: document.getElementById("historyList"),
@@ -355,6 +350,12 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function safeCssUrl(value) {
+  return String(value || "")
+    .trim()
+    .replace(/["'()\\\n\r]/g, "");
 }
 
 function inferRoles(card) {
@@ -503,6 +504,24 @@ function compareCardsByElixirDesc(a, b) {
   const variantA = VARIANT_ORDER[a.variant] ?? 99;
   const variantB = VARIANT_ORDER[b.variant] ?? 99;
   return variantA - variantB;
+}
+
+function catalogCardArtBySlug() {
+  const map = new Map();
+  if (!Array.isArray(state.ownedCards) || !state.ownedCards.length) {
+    return map;
+  }
+
+  for (const entry of state.ownedCards) {
+    const slug = String(entry?.slug || "").trim() || apiNameToSlug(entry?.name || "");
+    const iconUrl = String(entry?.iconUrl || "").trim();
+    if (!slug || !iconUrl || map.has(slug)) {
+      continue;
+    }
+    map.set(slug, iconUrl);
+  }
+
+  return map;
 }
 
 function cardLevel(card) {
@@ -1349,6 +1368,7 @@ function generateShareCard() {
 
 function renderCoachDeckCards(options = state.coachRecommendations) {
   if (!elements.coachDeckCards) {
+    renderComparisonSelectors();
     return;
   }
 
@@ -1493,14 +1513,7 @@ async function runOneTapMode(mode) {
     const result = formatUpgradeAdviceResponse();
     state.lastUpgradeText = result;
     setAnalysisOutput(result);
-    const main = state.coachRecommendations[0];
-    if (main?.cards?.length) {
-      const buckets = buildUpgradeBuckets(main.cards);
-      setAnalysisOutput(`${result}
-
-${upgradeBucketsText(buckets)}`);
-    }
-    addHistoryEntry("upgrade", "Upgrade path generated", "Buckets split into must/soon/wait.");
+    addHistoryEntry("upgrade", "Upgrade path generated", "Ranked from highest to lowest priority.");
     return;
   }
 
@@ -1701,6 +1714,7 @@ function visibleCards() {
 function renderCatalog() {
   const cards = visibleCards();
   const slugSet = deckSlugSet();
+  const artBySlug = catalogCardArtBySlug();
 
   elements.catalogCount.textContent = `${cards.length} shown`;
   elements.catalogGrid.innerHTML = "";
@@ -1739,6 +1753,11 @@ function renderCatalog() {
 
     const article = document.createElement("article");
     article.className = `card-item ${rarityClassName(card.rarity)} motion-tilt`;
+    const cardArtUrl = artBySlug.get(card.slug) || "";
+    if (cardArtUrl) {
+      article.classList.add("has-card-art");
+      article.style.setProperty("--card-art-url", `url("${safeCssUrl(cardArtUrl)}")`);
+    }
 
     const rolePills = card.roles
       .slice(0, 3)
@@ -2141,30 +2160,6 @@ function renderSuggestions(metrics) {
   }
 }
 
-function renderDeckExport(metrics) {
-  if (!state.deck.length) {
-    elements.deckText.value = "Your deck export will appear here.";
-    return;
-  }
-
-  const lines = deckCards()
-    .map((card, index) => {
-      let levelText = "";
-      if (state.collectionLoaded) {
-        levelText = `, L${cardLevel(card)}`;
-        if (card.variant === "evolution") {
-          levelText += `, Evo${cardEvolutionLevel(card)}`;
-        }
-      }
-      return `${index + 1}. ${card.name} (${formatElixir(card)}${levelText})`;
-    })
-    .join("\n");
-
-  const approxPrefix = metrics.hasVariableElixir ? "~" : "";
-  const levelSummary = state.collectionLoaded ? `\nAverage Level: ${metrics.avgLevel.toFixed(1)}` : "";
-  elements.deckText.value = `Deck (${state.deck.length}/${DECK_SIZE})\nAverage Elixir: ${approxPrefix}${metrics.avgElixir.toFixed(2)}${levelSummary}\n\n${lines}`;
-}
-
 function updateOwnedSummary() {
   if (!state.collectionLoaded) {
     elements.ownedSummary.textContent = "Collection not loaded";
@@ -2303,7 +2298,7 @@ function renderOwnedCards() {
         <article class="owned-card-item ${rarityClass} motion-tilt">
           <div class="owned-card-top">
             <div class="owned-card-icon">${icon}</div>
-            <h4>${name}</h4>
+            <h4 title="${name}">${name}</h4>
           </div>
           <div class="owned-card-chips">
             ${hasEvoVariant ? `<span class="variant-chip evolution">Evolution</span>` : ""}
@@ -2332,7 +2327,6 @@ function renderAll() {
   renderStats(metrics);
   renderCoverage(metrics);
   renderSuggestions(metrics);
-  renderDeckExport(metrics);
   renderCoachDeckCards(state.coachRecommendations);
   renderComparisonSelectors();
   renderPinnedDeck();
@@ -2469,29 +2463,6 @@ function generateRandomDeck() {
   }
 
   return fallback;
-}
-
-async function copyDeckExport() {
-  const text = elements.deckText.value.trim();
-
-  if (!text || text === "Your deck export will appear here.") {
-    setStatus("Build a deck first.", "warn");
-    return;
-  }
-
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      elements.deckText.focus();
-      elements.deckText.select();
-      document.execCommand("copy");
-    }
-
-    setStatus("Deck text copied.");
-  } catch (_error) {
-    setStatus("Copy failed. Select text and copy manually.", "bad");
-  }
 }
 
 function sanitizePlayerTag(rawTag) {
@@ -3088,7 +3059,6 @@ function rankDeckUpgradePriorities(cards) {
 
   return weighted
     .sort((a, b) => b.score - a.score || a.level - b.level || a.card.name.localeCompare(b.card.name))
-    .slice(0, 5)
     .map((entry) => `${entry.card.name} (L${entry.level})`);
 }
 
@@ -4137,7 +4107,6 @@ function renderDeckExplorer() {
                 <h4>${escapeHtml(deck.name || "Deck")}</h4>
                 <p class="explorer-deck-sub">${escapeHtml(deck.archetype || "Unknown")} • Avg ${Number(deck.averageElixir || 0).toFixed(2)} • ${escapeHtml(sourceType)}</p>
               </div>
-              <span class="score-chip">Pop ${Number(deck.popularity || 0)}</span>
             </div>
             <div class="explorer-card-list">
               ${cards.map((card) => `<span class="explorer-card-chip">${escapeHtml(card.name || "Unknown")}</span>`).join("")}
@@ -4710,10 +4679,6 @@ function bindEvents() {
     state.deck = [];
     renderAll();
     setStatus("Deck cleared.");
-  });
-
-  elements.copyDeckBtn.addEventListener("click", () => {
-    void copyDeckExport();
   });
 
   elements.loadCollectionBtn.addEventListener("click", () => {
