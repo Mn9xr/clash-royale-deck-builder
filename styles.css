@@ -332,8 +332,8 @@ h1 {
 .card-item {
   --rarity-border: #345365;
   --rarity-bg: linear-gradient(165deg, rgba(14, 42, 62, 0.94), rgba(12, 34, 50, 0.94));
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   border: 1px solid var(--rarity-border);
   border-radius: 12px;
@@ -436,14 +436,17 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+  align-content: flex-start;
+  min-height: 28px;
 }
 
 .role-tag {
   font-size: 0.75rem;
+  line-height: 1.1;
   color: #c8dded;
   border: 1px solid #47677d;
   border-radius: 999px;
-  padding: 2px 8px;
+  padding: 3px 10px;
 }
 
 .btn {
@@ -472,6 +475,10 @@ h1 {
   border: 1px solid #4f6c80;
   color: var(--text);
   width: 100%;
+}
+
+.card-item .btn.subtle {
+  margin-top: auto;
 }
 
 .btn:disabled {
