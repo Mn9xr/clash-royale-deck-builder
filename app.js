@@ -14,6 +14,7 @@ const MAX_HISTORY_ITEMS = 30;
 const MAX_CARD_LEVEL = 16;
 const DECK_EXPLORER_FAVORITES_KEY = "deckforge_explorer_favorites";
 const DECK_EXPLORER_API = "/api/decks/explorer";
+const CARD_ICONS_API = "/api/cards/icons";
 const STATUS_API = "/api/status";
 const CHATBOT_PING_API = "/api/status/chatbot-ping";
 const COACH_CHAT_API = "/api/chat/coach";
@@ -315,6 +316,7 @@ const state = {
   savedProfiles: [],
   search: "",
   catalogQuickFilter: "all",
+  catalogArtBySlug: new Map(),
   statusTimer: null,
   statusPollTimer: null,
   statusSnapshot: null,
@@ -356,6 +358,10 @@ function safeCssUrl(value) {
   return String(value || "")
     .trim()
     .replace(/["'()\\\n\r]/g, "");
+}
+
+function catalogArtKey(slug, variant = "base") {
+  return `${String(slug || "").trim()}::${String(variant || "base").trim()}`;
 }
 
 function inferRoles(card) {
@@ -507,18 +513,16 @@ function compareCardsByElixirDesc(a, b) {
 }
 
 function catalogCardArtBySlug() {
-  const map = new Map();
-  if (!Array.isArray(state.ownedCards) || !state.ownedCards.length) {
-    return map;
-  }
+  const map = new Map(state.catalogArtBySlug || []);
 
   for (const entry of state.ownedCards) {
     const slug = String(entry?.slug || "").trim() || apiNameToSlug(entry?.name || "");
     const iconUrl = String(entry?.iconUrl || "").trim();
-    if (!slug || !iconUrl || map.has(slug)) {
+    if (!slug || !iconUrl) {
       continue;
     }
-    map.set(slug, iconUrl);
+    // Prefer icon URLs from live collection payload when available.
+    map.set(catalogArtKey(slug, "base"), iconUrl);
   }
 
   return map;
@@ -1513,6 +1517,8 @@ async function runOneTapMode(mode) {
     const result = formatUpgradeAdviceResponse();
     state.lastUpgradeText = result;
     setAnalysisOutput(result);
+    pushChatMessage("bot", result);
+    setStatus("Best upgrade path generated. Check Deck Coach Chat for full highest-to-lowest order.", "info");
     addHistoryEntry("upgrade", "Upgrade path generated", "Ranked from highest to lowest priority.");
     return;
   }
@@ -1752,12 +1758,26 @@ function renderCatalog() {
     }
 
     const article = document.createElement("article");
-    article.className = `card-item ${rarityClassName(card.rarity)} motion-tilt`;
-    const cardArtUrl = artBySlug.get(card.slug) || "";
+    const variantCardClass = card.variant === "evolution"
+      ? "variant-card-evolution"
+      : card.variant === "hero"
+        ? "variant-card-hero"
+        : "";
+    article.className = `card-item ${rarityClassName(card.rarity)} motion-tilt ${variantCardClass}`.trim();
+    const cardArtUrl = artBySlug.get(catalogArtKey(card.slug, card.variant)) || artBySlug.get(catalogArtKey(card.slug, "base")) || "";
     if (cardArtUrl) {
       article.classList.add("has-card-art");
       article.style.setProperty("--card-art-url", `url("${safeCssUrl(cardArtUrl)}")`);
     }
+    const name = escapeHtml(card.name);
+    const cardIcon = cardArtUrl
+      ? `<span class="catalog-card-icon"><img src="${escapeHtml(cardArtUrl)}" alt="${name}" loading="lazy" /></span>`
+      : "";
+    const variantEffects = card.variant === "evolution"
+      ? '<span class="variant-fx variant-fx-evolution" aria-hidden="true"></span><span class="variant-particles variant-particles-evolution" aria-hidden="true"></span>'
+      : card.variant === "hero"
+        ? '<span class="variant-fx variant-fx-hero" aria-hidden="true"></span><span class="variant-particles variant-particles-hero" aria-hidden="true"></span>'
+        : "";
 
     const rolePills = card.roles
       .slice(0, 3)
@@ -1780,8 +1800,12 @@ function renderCatalog() {
     }
 
     article.innerHTML = `
+      ${variantEffects}
       <div class="card-title-row">
-        <h4>${card.name}</h4>
+        <div class="card-title-head">
+          ${cardIcon}
+          <h4>${name}</h4>
+        </div>
         <div class="card-chips">
           <span class="variant-chip ${card.variant}">${PRETTY_VARIANT[card.variant]}</span>
           <span class="rarity-chip">${card.rarity}</span>
@@ -2277,10 +2301,12 @@ function renderOwnedCards() {
     return;
   }
 
+  const artBySlug = catalogCardArtBySlug();
+
   elements.ownedCardsGrid.innerHTML = cards
     .map((card) => {
       const name = escapeHtml(card?.name || "Unknown");
-      const iconUrl = card?.iconUrl ? escapeHtml(card.iconUrl) : "";
+      const iconUrl = String(card?.iconUrl || "").trim();
       const level = Number(card?.level ?? 0);
       const maxLevel = Number(card?.maxLevel ?? 0);
       const count = Number(card?.count ?? 0);
@@ -2289,13 +2315,32 @@ function renderOwnedCards() {
       const rarityClass = rarityClassName(card?.rarity);
       const hasEvoVariant = Boolean(card?.hasEvoVariant);
       const hasHeroVariant = Boolean(card?.hasHeroVariant);
+      const slug = String(card?.slug || "").trim() || apiNameToSlug(card?.name || "");
+      const preferredVariant = hasHeroVariant ? "hero" : hasEvoVariant ? "evolution" : "base";
+      const cardArtUrl = slug
+        ? artBySlug.get(catalogArtKey(slug, preferredVariant)) || artBySlug.get(catalogArtKey(slug, "base")) || iconUrl
+        : iconUrl;
+      const variantCardClass = preferredVariant === "evolution"
+        ? "variant-card-evolution"
+        : preferredVariant === "hero"
+          ? "variant-card-hero"
+          : "";
+      const hasCardArt = Boolean(cardArtUrl);
+      const safeArtCss = hasCardArt ? safeCssUrl(cardArtUrl) : "";
+      const variantEffects = preferredVariant === "evolution"
+        ? '<span class="variant-fx variant-fx-evolution" aria-hidden="true"></span><span class="variant-particles variant-particles-evolution" aria-hidden="true"></span>'
+        : preferredVariant === "hero"
+          ? '<span class="variant-fx variant-fx-hero" aria-hidden="true"></span><span class="variant-particles variant-particles-hero" aria-hidden="true"></span>'
+          : "";
+      const articleClasses = `owned-card-item ${rarityClass} motion-tilt ${variantCardClass} ${hasCardArt ? "has-card-art" : ""}`.trim();
 
-      const icon = iconUrl
-        ? `<img src="${iconUrl}" alt="${name}" loading="lazy" />`
+      const icon = hasCardArt
+        ? `<img src="${escapeHtml(cardArtUrl)}" alt="${name}" loading="lazy" />`
         : `<div class="owned-card-fallback">${name.charAt(0)}</div>`;
 
       return `
-        <article class="owned-card-item ${rarityClass} motion-tilt">
+        <article class="${articleClasses}" ${hasCardArt ? `style="--card-art-url: url('${safeArtCss}');"` : ""}>
+          ${variantEffects}
           <div class="owned-card-top">
             <div class="owned-card-icon">${icon}</div>
             <h4 title="${name}">${name}</h4>
@@ -3048,7 +3093,8 @@ function rankDeckUpgradePriorities(cards) {
 
     const level = Math.max(0, Math.min(MAX_CARD_LEVEL, cardLevel(card)));
     const roomToGrow = Math.max(0, MAX_CARD_LEVEL - level);
-    const score = importance * 10 + roomToGrow;
+    const belowTarget = Math.max(0, state.minOwnedLevel - level);
+    const score = roomToGrow * 12 + importance * 8 + belowTarget * 25;
 
     return {
       card,
@@ -3705,7 +3751,7 @@ function formatUpgradeAdviceResponse() {
     "",
     "Full Explanation",
     `Main reference deck: ${main.name}.`,
-    "Upgrade priority ranking:",
+    "Upgrade priority ranking (highest to lowest):",
     ...priorities.map((item, index) => `${index + 1}. ${item}`),
     "Why this order matters:",
     "- Win condition levels convert more pushes into tower damage.",
@@ -3853,6 +3899,42 @@ async function appApiRequest(path, options = {}, timeoutMs = 10000) {
     return payload || {};
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+async function preloadCatalogArt() {
+  try {
+    const payload = await appApiRequest(CARD_ICONS_API, { method: "GET" }, 10000);
+    const icons = Array.isArray(payload?.icons) ? payload.icons : [];
+    const next = new Map();
+
+    for (const entry of icons) {
+      const iconUrl = String(entry?.iconUrl || "").trim();
+      const slug = apiNameToSlug(entry?.name || "");
+      if (!slug) {
+        continue;
+      }
+
+      if (iconUrl) {
+        next.set(catalogArtKey(slug, "base"), iconUrl);
+      }
+
+      const evoIconUrl = String(entry?.evolutionIconUrl || "").trim();
+      if (evoIconUrl) {
+        next.set(catalogArtKey(slug, "evolution"), evoIconUrl);
+      }
+
+      const heroIconUrl = String(entry?.heroIconUrl || "").trim();
+      if (heroIconUrl) {
+        next.set(catalogArtKey(slug, "hero"), heroIconUrl);
+      }
+    }
+
+    state.catalogArtBySlug = next;
+    renderCatalog();
+    refreshInteractiveMotion();
+  } catch (_error) {
+    // Optional visual enhancement only.
   }
 }
 
@@ -5038,6 +5120,7 @@ function initialize() {
   void refreshSavedProfilesList();
   void refreshStatusTracker();
   void refreshDeckExplorer(false);
+  void preloadCatalogArt();
   startStatusPolling();
   window.addEventListener("beforeunload", () => {
     if (state.statusPollTimer) {

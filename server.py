@@ -33,6 +33,7 @@ STATUS_STALE_SECONDS = max(60, int(os.getenv("STATUS_STALE_SECONDS", "900")))
 APP_BUILD_LABEL = os.getenv("APP_BUILD_LABEL", "local-dev")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip() or "http://127.0.0.1:11434"
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip() or "llama3.1:8b"
+CARD_ICON_CACHE_TTL_SECONDS = max(300, int(os.getenv("CARD_ICON_CACHE_TTL_SECONDS", "21600")))
 
 try:
     OLLAMA_TIMEOUT_SECONDS = max(5.0, float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "45")))
@@ -75,6 +76,10 @@ RUNTIME_STATUS = {
 
 ACTIVITY_LOG: list[dict] = []
 CHAT_SESSIONS: dict[str, dict] = {}
+CATALOG_ICONS_CACHE = {
+    "icons": [],
+    "updatedAt": 0.0,
+}
 
 
 class ApiError(Exception):
@@ -191,6 +196,61 @@ def fetch_player_data(clean_tag: str, token: str) -> dict:
         return response.json()
     except ValueError as exc:
         raise ApiError("Clash Royale API returned invalid JSON.", 502) from exc
+
+
+def fetch_card_catalog(token: str) -> list[dict]:
+    """Fetch official Clash Royale card catalog with icon URLs."""
+    timeout = float(os.getenv("CR_API_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
+    url = f"{CLASH_API_BASE}/cards"
+
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=timeout)
+    except requests.Timeout as exc:
+        raise ApiError("Clash Royale cards request timed out.", 504) from exc
+    except requests.RequestException as exc:
+        raise ApiError("Could not reach Clash Royale API.", 502) from exc
+
+    if response.status_code in (401, 403):
+        raise ApiError("Server cannot access Clash Royale API with current token.", 502)
+    if response.status_code == 429:
+        raise ApiError("Clash Royale API rate limit reached. Try again soon.", 503)
+    if not response.ok:
+        raise ApiError("Clash Royale API returned an unexpected response.", 502)
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise ApiError("Clash Royale API returned invalid JSON.", 502) from exc
+
+    items = payload.get("items") or []
+    icons: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        icon_urls = item.get("iconUrls") or {}
+        icon_url = str(icon_urls.get("medium") or "").strip()
+        evolution_icon_url = str(icon_urls.get("evolutionMedium") or "").strip()
+        hero_icon_url = str(icon_urls.get("heroMedium") or "").strip()
+        if not name or not icon_url:
+            continue
+        icons.append(
+            {
+                "id": int(item.get("id") or 0),
+                "name": name,
+                "iconUrl": icon_url,
+                "evolutionIconUrl": evolution_icon_url,
+                "heroIconUrl": hero_icon_url,
+            }
+        )
+
+    icons.sort(key=lambda entry: entry["name"].lower())
+    return icons
 
 
 def extract_player_profile(payload: dict, clean_tag: str) -> dict:
@@ -574,6 +634,59 @@ def api_get_player(player_tag: str):
         RUNTIME_STATUS["playerFetchState"] = "error"
         push_activity("player_api", "error", "Unexpected server error while loading player data.")
         return jsonify({"error": "Unexpected server error while loading player data."}), 500
+
+
+@app.get("/api/cards/icons")
+def api_get_card_icons():
+    """Return cached official card icon URLs for frontend catalog visuals."""
+    token = os.getenv("CR_API_TOKEN", "").strip()
+    force_refresh = request.args.get("refresh", "0") == "1"
+    now = time.time()
+    cache_age = now - float(CATALOG_ICONS_CACHE.get("updatedAt") or 0.0)
+    cache_fresh = bool(CATALOG_ICONS_CACHE.get("icons")) and cache_age < CARD_ICON_CACHE_TTL_SECONDS
+
+    if not force_refresh and cache_fresh:
+        return jsonify(
+            {
+                "icons": CATALOG_ICONS_CACHE["icons"],
+                "meta": {
+                    "count": len(CATALOG_ICONS_CACHE["icons"]),
+                    "cached": True,
+                    "ageSeconds": int(cache_age),
+                },
+            }
+        )
+
+    if not token:
+        return jsonify({"icons": [], "meta": {"count": 0, "cached": False, "reason": "CR_API_TOKEN missing"}}), 200
+
+    try:
+        icons = fetch_card_catalog(token)
+        CATALOG_ICONS_CACHE["icons"] = icons
+        CATALOG_ICONS_CACHE["updatedAt"] = now
+        return jsonify(
+            {
+                "icons": icons,
+                "meta": {
+                    "count": len(icons),
+                    "cached": False,
+                    "ageSeconds": 0,
+                },
+            }
+        )
+    except ApiError as exc:
+        if CATALOG_ICONS_CACHE.get("icons"):
+            return jsonify(
+                {
+                    "icons": CATALOG_ICONS_CACHE["icons"],
+                    "meta": {
+                        "count": len(CATALOG_ICONS_CACHE["icons"]),
+                        "cached": True,
+                        "warning": exc.message,
+                    },
+                }
+            )
+        return jsonify({"error": exc.message}), exc.status_code
 
 
 @app.get("/api/storage/profiles")

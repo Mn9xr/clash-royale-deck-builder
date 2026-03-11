@@ -349,7 +349,24 @@ h1 {
   z-index: 2;
 }
 
-.card-item.has-card-art::before {
+.card-item > :not(.variant-fx):not(.variant-particles),
+.owned-card-item > :not(.variant-fx):not(.variant-particles) {
+  z-index: 3;
+}
+
+.card-item > .variant-fx,
+.card-item > .variant-particles,
+.owned-card-item > .variant-fx,
+.owned-card-item > .variant-particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 2;
+}
+
+.card-item.has-card-art::before,
+.owned-card-item.has-card-art::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -363,13 +380,106 @@ h1 {
   filter: saturate(1.08) contrast(1.04);
 }
 
-.card-item.has-card-art::after {
+.owned-card-item.has-card-art::before {
+  background-size: 86% auto;
+  background-position: right -16px center;
+  opacity: 0.24;
+}
+
+.card-item.has-card-art::after,
+.owned-card-item.has-card-art::after {
   content: "";
   position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
   background: linear-gradient(110deg, rgba(7, 21, 34, 0.88) 0%, rgba(7, 21, 34, 0.74) 42%, rgba(7, 21, 34, 0.46) 70%, rgba(7, 21, 34, 0.7) 100%);
+}
+
+.card-item.variant-card-evolution > .variant-fx-evolution,
+.owned-card-item.variant-card-evolution > .variant-fx-evolution {
+  background:
+    linear-gradient(
+      114deg,
+      rgba(96, 238, 255, 0) 24%,
+      rgba(167, 252, 255, 0.34) 42%,
+      rgba(156, 184, 255, 0.3) 52%,
+      rgba(96, 238, 255, 0) 68%
+    ),
+    radial-gradient(140px 98px at 88% 16%, rgba(116, 244, 255, 0.28), transparent 72%);
+  background-size: 220% 100%, 100% 100%;
+  mix-blend-mode: screen;
+  animation: variantShineEvolution 5.4s linear infinite;
+}
+
+.card-item.variant-card-evolution > .variant-particles-evolution,
+.owned-card-item.variant-card-evolution > .variant-particles-evolution {
+  background-image:
+    radial-gradient(circle at 12% 22%, rgba(197, 250, 255, 0.92) 0 1.2px, transparent 2.3px),
+    radial-gradient(circle at 76% 18%, rgba(132, 238, 255, 0.82) 0 1.1px, transparent 2.2px),
+    radial-gradient(circle at 64% 56%, rgba(170, 203, 255, 0.74) 0 1.1px, transparent 2.1px),
+    radial-gradient(circle at 24% 70%, rgba(121, 230, 255, 0.68) 0 1.1px, transparent 2px),
+    radial-gradient(circle at 86% 78%, rgba(168, 151, 255, 0.72) 0 1.1px, transparent 2.2px);
+  opacity: 0.5;
+  animation: variantParticlesFloat 6.2s ease-in-out infinite;
+}
+
+.card-item.variant-card-hero > .variant-fx-hero,
+.owned-card-item.variant-card-hero > .variant-fx-hero {
+  background:
+    linear-gradient(
+      116deg,
+      rgba(122, 255, 204, 0) 24%,
+      rgba(191, 255, 226, 0.24) 40%,
+      rgba(255, 224, 142, 0.3) 52%,
+      rgba(122, 255, 204, 0) 68%
+    ),
+    radial-gradient(142px 100px at 90% 12%, rgba(255, 226, 132, 0.28), transparent 74%);
+  background-size: 220% 100%, 100% 100%;
+  mix-blend-mode: screen;
+  animation: variantShineHero 6.4s linear infinite;
+}
+
+.card-item.variant-card-hero > .variant-particles-hero,
+.owned-card-item.variant-card-hero > .variant-particles-hero {
+  background-image:
+    radial-gradient(circle at 14% 20%, rgba(233, 255, 240, 0.9) 0 1.2px, transparent 2.3px),
+    radial-gradient(circle at 72% 24%, rgba(188, 255, 223, 0.82) 0 1.15px, transparent 2.2px),
+    radial-gradient(circle at 60% 54%, rgba(255, 232, 146, 0.84) 0 1.1px, transparent 2.1px),
+    radial-gradient(circle at 28% 78%, rgba(150, 244, 205, 0.72) 0 1.05px, transparent 2px),
+    radial-gradient(circle at 84% 76%, rgba(255, 246, 206, 0.8) 0 1.1px, transparent 2.2px);
+  opacity: 0.5;
+  animation: variantParticlesFloat 6.8s ease-in-out infinite;
+}
+
+@keyframes variantShineEvolution {
+  0% {
+    background-position: 160% 0, 0 0;
+  }
+  100% {
+    background-position: -70% 0, 0 0;
+  }
+}
+
+@keyframes variantShineHero {
+  0% {
+    background-position: 150% 0, 0 0;
+  }
+  100% {
+    background-position: -75% 0, 0 0;
+  }
+}
+
+@keyframes variantParticlesFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.38;
+  }
+  50% {
+    transform: translate3d(0, -5px, 0) scale(1.03);
+    opacity: 0.56;
+  }
 }
 
 .card-item h4 {
@@ -384,12 +494,39 @@ h1 {
   gap: 6px;
 }
 
+.card-title-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .card-title-row h4 {
   min-width: 0;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.catalog-card-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  border: 1px solid rgba(103, 139, 162, 0.72);
+  background: rgba(10, 28, 40, 0.9);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.catalog-card-icon img {
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
+  display: block;
 }
 
 .card-chips,
@@ -842,11 +979,19 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
   min-width: 0;
   border: 1px solid var(--rarity-border);
   border-radius: 10px;
   padding: 8px;
   background: var(--rarity-bg);
+}
+
+.owned-card-item > * {
+  position: relative;
+  z-index: 2;
 }
 
 .card-item.rarity-common,
@@ -905,6 +1050,7 @@ h1 {
   font-size: 0.96rem;
   line-height: 1.2;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -982,7 +1128,8 @@ h1 {
     grid-template-columns: 1fr;
   }
 
-  .card-item.has-card-art::before {
+  .card-item.has-card-art::before,
+  .owned-card-item.has-card-art::before {
     background-size: 70% auto;
     background-position: right -8px center;
     opacity: 0.24;
@@ -1428,7 +1575,9 @@ body.motion-enabled .profile-stat:hover {
   .tilt-surface,
   .btn,
   .spotlight-surface::before,
-  .skeleton-line {
+  .skeleton-line,
+  .variant-fx,
+  .variant-particles {
     animation: none !important;
     transition: none !important;
     transform: none !important;
