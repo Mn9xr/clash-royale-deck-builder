@@ -2,8 +2,13 @@ import { CARDS, CARD_META } from "./cards-data.js";
 import { initializeInteractiveMotion, refreshInteractiveMotion } from "./ui-motion.js";
 
 const DECK_SIZE = 8;
-const MAX_HERO_CHAMPION_CARDS = 1;
-const MAX_EVOLUTION_CARDS = 2;
+const SPECIAL_SLOT_LIMITS = Object.freeze({
+  evolution: 1,
+  heroChampion: 1,
+  wild: 1
+});
+const MAX_HERO_CHAMPION_CARDS = SPECIAL_SLOT_LIMITS.heroChampion + SPECIAL_SLOT_LIMITS.wild;
+const MAX_EVOLUTION_CARDS = SPECIAL_SLOT_LIMITS.evolution + SPECIAL_SLOT_LIMITS.wild;
 const VARIABLE_ELIXIR_ESTIMATE = 4;
 const COLLECTION_API_BASE = "/api";
 const BATTLELOG_API_BASE = "/api/player";
@@ -310,6 +315,7 @@ const elements = {
   saveProfileBtn: document.getElementById("saveProfileBtn"),
   searchInput: document.getElementById("searchInput"),
   shareCardOutput: document.getElementById("shareCardOutput"),
+  specialSlotTracker: document.getElementById("specialSlotTracker"),
   statusMessage: document.getElementById("statusMessage"),
   suggestionList: document.getElementById("suggestionList"),
   catalogCount: document.getElementById("catalogCount"),
@@ -694,9 +700,23 @@ function isEvolutionCard(card) {
 
 function countDeckSpecialCards(cards = []) {
   const safeCards = Array.isArray(cards) ? cards : [];
+  const heroChampionCount = safeCards.filter((card) => isHeroOrChampionCard(card)).length;
+  const evolutionCount = safeCards.filter((card) => isEvolutionCard(card)).length;
+  const evolutionOnlyUsed = Math.min(evolutionCount, SPECIAL_SLOT_LIMITS.evolution);
+  const heroChampionOnlyUsed = Math.min(heroChampionCount, SPECIAL_SLOT_LIMITS.heroChampion);
+  const wildFromEvolution = Math.max(0, evolutionCount - SPECIAL_SLOT_LIMITS.evolution);
+  const wildFromHeroChampion = Math.max(0, heroChampionCount - SPECIAL_SLOT_LIMITS.heroChampion);
+  const wildUsed = wildFromEvolution + wildFromHeroChampion;
+
   return {
-    heroChampionCount: safeCards.filter((card) => isHeroOrChampionCard(card)).length,
-    evolutionCount: safeCards.filter((card) => isEvolutionCard(card)).length
+    heroChampionCount,
+    evolutionCount,
+    evolutionOnlyUsed,
+    heroChampionOnlyUsed,
+    wildFromEvolution,
+    wildFromHeroChampion,
+    wildUsed,
+    specialCount: heroChampionCount + evolutionCount
   };
 }
 
@@ -706,18 +726,81 @@ function validateDeckSpecialCaps(cards = []) {
   if (counts.heroChampionCount > MAX_HERO_CHAMPION_CARDS) {
     return {
       legal: false,
-      message: `Deck cap reached: max ${MAX_HERO_CHAMPION_CARDS} Hero/Champion card.`
+      message: `Deck cap reached: 1 Hero slot + 1 Wild slot means max ${MAX_HERO_CHAMPION_CARDS} Hero/Champion cards.`
     };
   }
 
   if (counts.evolutionCount > MAX_EVOLUTION_CARDS) {
     return {
       legal: false,
-      message: `Deck cap reached: max ${MAX_EVOLUTION_CARDS} Evolution cards.`
+      message: `Deck cap reached: 1 Evo slot + 1 Wild slot means max ${MAX_EVOLUTION_CARDS} Evolution cards.`
+    };
+  }
+
+  if (counts.wildUsed > SPECIAL_SLOT_LIMITS.wild) {
+    return {
+      legal: false,
+      message: "Deck cap reached: only 1 Wild slot can hold an extra Evolution or Hero/Champion card."
     };
   }
 
   return { legal: true, message: "" };
+}
+
+function renderSpecialSlotTracker(cards = deckCards()) {
+  if (!elements.specialSlotTracker) {
+    return;
+  }
+
+  const counts = countDeckSpecialCards(cards);
+  const wildLabels = [];
+
+  if (counts.wildFromEvolution > 0) {
+    wildLabels.push("Evolution");
+  }
+  if (counts.wildFromHeroChampion > 0) {
+    wildLabels.push("Hero/Champion");
+  }
+
+  const wildOverflow = counts.wildUsed > SPECIAL_SLOT_LIMITS.wild;
+  const trackerItems = [
+    {
+      label: "Evo Slot",
+      value: counts.evolutionOnlyUsed ? "Filled" : "Open",
+      note: counts.evolutionCount ? `${counts.evolutionCount}/${MAX_EVOLUTION_CARDS} evo in deck` : "Add 1 Evolution",
+      state: counts.evolutionOnlyUsed ? "filled" : "empty"
+    },
+    {
+      label: "Hero Slot",
+      value: counts.heroChampionOnlyUsed ? "Filled" : "Open",
+      note: counts.heroChampionCount
+        ? `${counts.heroChampionCount}/${MAX_HERO_CHAMPION_CARDS} hero/champion in deck`
+        : "Add 1 Hero or Champion",
+      state: counts.heroChampionOnlyUsed ? "filled" : "empty"
+    },
+    {
+      label: "Wild Slot",
+      value: wildOverflow ? "Overflow" : wildLabels[0] || "Open",
+      note: wildOverflow
+        ? "Too many extra special cards"
+        : wildLabels.length
+          ? `Covers extra ${wildLabels.join(" + ")}`
+          : "Holds 1 extra Evo or Hero",
+      state: wildOverflow ? "overflow" : counts.wildUsed ? "filled" : "empty"
+    }
+  ];
+
+  elements.specialSlotTracker.innerHTML = trackerItems
+    .map(
+      (item) => `
+        <article class="special-slot-chip" data-state="${item.state}">
+          <span class="special-slot-label">${item.label}</span>
+          <strong>${item.value}</strong>
+          <span class="special-slot-note">${item.note}</span>
+        </article>
+      `
+    )
+    .join("");
 }
 
 function buildDeckSnapshotFromCards(cards, name = "Deck", source = "manual") {
@@ -2788,6 +2871,7 @@ function renderAll() {
   renderFilters();
   renderCatalog();
   renderCollectionInsights();
+  renderSpecialSlotTracker();
   renderDeckSlots();
   renderStats(metrics);
   renderCoverage(metrics);

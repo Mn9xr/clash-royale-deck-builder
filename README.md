@@ -19,8 +19,9 @@ Project owner and creator: `Mn9xr`.
   - randomize / clear / pin-current actions
   - deck history and pinned deck summary/share
 - Deck legality rules:
-  - max `1` hero/champion card per deck
-  - max `2` evolution cards per deck
+  - `1` evo slot
+  - `1` hero/champion slot
+  - `1` wild slot that can hold one extra evo or hero/champion card
 - Deck Health panel (premium UI) with:
   - live score badge
   - strong/watch/fix status chips

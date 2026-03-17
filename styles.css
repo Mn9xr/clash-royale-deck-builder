@@ -701,6 +701,51 @@ h1 {
   font-weight: 600;
 }
 
+.special-slot-tracker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.special-slot-chip {
+  border: 1px solid rgba(82, 116, 136, 0.78);
+  border-radius: 12px;
+  background: rgba(10, 30, 44, 0.78);
+  padding: 9px 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.special-slot-chip[data-state="filled"] {
+  border-color: rgba(74, 191, 157, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(74, 191, 157, 0.14);
+}
+
+.special-slot-chip[data-state="overflow"] {
+  border-color: rgba(255, 95, 109, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(255, 95, 109, 0.14);
+}
+
+.special-slot-label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.special-slot-chip strong {
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
+.special-slot-note {
+  color: #c7dbeb;
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
 .deck-slots {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1185,6 +1230,10 @@ h1 {
   .app-shell {
     padding: 14px;
     gap: 14px;
+  }
+
+  .special-slot-tracker {
+    grid-template-columns: 1fr;
   }
 
   .deck-slots {
