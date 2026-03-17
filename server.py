@@ -49,6 +49,105 @@ WIN_CONDITION_KEYS = {
 BAIT_HINT_KEYS = {"goblinbarrel", "princess", "dartgoblin", "rascals"}
 BEATDOWN_HINT_KEYS = {"golem", "lavahound", "electrogiant", "elixirgolem", "giant", "goblingiant"}
 
+ROLE_SIGNAL_ARCHETYPE_RULES: dict[str, list[tuple[str, int, str]]] = {
+    "Bait": [
+        ("spell", 7, "You need cleaner small-spell timing into bait pressure."),
+        ("swarm_clear", 8, "Extra swarm clear helps you stop layered bait pushes."),
+    ],
+    "Beatdown": [
+        ("building", 6, "A sturdier building helps you slow heavier pushes."),
+        ("air_defense", 6, "Beatdown shells punish thin anti-air coverage."),
+        ("reset", 4, "Reset support matters more when tanks protect Inferno-style answers."),
+    ],
+    "Drill Control": [
+        ("swarm_clear", 6, "Reliable splash or spell support helps into Drill pressure."),
+        ("cycle", 3, "Faster cycle helps you keep drill answers in hand."),
+    ],
+    "Graveyard Control": [
+        ("swarm_clear", 7, "You need steadier skeleton cleanup into Graveyard."),
+        ("big_spell", 4, "A stronger spell package helps clear support behind Graveyard."),
+    ],
+    "Hog Cycle": [
+        ("building", 8, "A dependable building makes Hog matchups less punishing."),
+        ("cycle", 3, "Cleaner low-cost rotation helps keep your Hog answer available."),
+    ],
+    "Hog EQ Cycle": [
+        ("building", 9, "Earthquake pressure rewards sturdier building coverage."),
+        ("cycle", 4, "Faster rotation helps you keep pace with Hog EQ cycle."),
+    ],
+    "Miner WB": [
+        ("swarm_clear", 5, "Wall Breakers pressure is easier with quicker splash access."),
+        ("tank", 3, "A sturdier body helps absorb chip and counterpush."),
+    ],
+    "RG Control": [
+        ("building", 7, "Royal Giant is easier to manage with a real building anchor."),
+        ("reset", 4, "Reset coverage helps against layered support and pressure."),
+    ],
+    "Siege": [
+        ("tank", 5, "Siege matchups improve when you can plant a tougher distraction."),
+        ("big_spell", 3, "Spell reach helps you break through defensive siege setups."),
+    ],
+}
+
+ROLE_SIGNAL_CARD_RULES: dict[str, list[tuple[str, int, str]]] = {
+    "balloon": [("air_defense", 7, "Balloon pressure punishes thin anti-air.")],
+    "battleram": [("building", 4, "Bridge-spam pressure is easier with a building stop.")],
+    "bats": [("swarm_clear", 2, "Cheap air swarms keep forcing awkward cleanups.")],
+    "goblinbarrel": [
+        ("spell", 6, "Goblin Barrel pressure is stretching your spell cycle."),
+        ("swarm_clear", 4, "Extra cleanup helps when Barrel pressure stacks."),
+    ],
+    "goblindrill": [
+        ("swarm_clear", 5, "Goblin Drill pressure asks for faster splash cleanup."),
+        ("building", 2, "A sturdier defensive anchor helps contain Drill setups."),
+    ],
+    "graveyard": [
+        ("swarm_clear", 6, "Graveyard needs more reliable skeleton cleanup."),
+        ("big_spell", 3, "A stronger spell helps remove Graveyard support."),
+    ],
+    "hogrider": [("building", 6, "Hog Rider keeps demanding a consistent building answer.")],
+    "infernodragon": [
+        ("reset", 5, "Inferno Dragon is asking for a reset answer."),
+        ("air_defense", 2, "Extra anti-air helps keep Inferno Dragon from snowballing."),
+    ],
+    "infernotower": [
+        ("reset", 4, "Reset support helps break Inferno Tower value."),
+        ("big_spell", 2, "A bigger spell can soften Inferno-based defenses."),
+    ],
+    "lavahound": [("air_defense", 8, "Lava pushes punish decks with limited anti-air.")],
+    "minionhorde": [("swarm_clear", 4, "Minion Horde demands cleaner instant clear.")],
+    "mortar": [
+        ("tank", 4, "A tougher distraction helps absorb Mortar locks."),
+        ("big_spell", 2, "Spell pressure helps you break Mortar support."),
+    ],
+    "phoenix": [("air_defense", 4, "Phoenix keeps adding air pressure to your losses.")],
+    "princess": [
+        ("spell", 3, "Princess is forcing low-value spell trades."),
+        ("swarm_clear", 2, "Extra splash helps stop Princess-backed swarms."),
+    ],
+    "ramrider": [
+        ("building", 4, "Ram Rider pressure is easier with a real building stop."),
+        ("reset", 2, "Reset coverage helps break Ram Rider control windows."),
+    ],
+    "royalhogs": [
+        ("building", 5, "Royal Hogs are easier to manage with a sturdy building."),
+        ("swarm_clear", 2, "Extra splash helps stop split-lane pig pressure."),
+    ],
+    "skeletonbarrel": [
+        ("spell", 3, "Skeleton Barrel keeps taxing your light spell timing."),
+        ("swarm_clear", 3, "Better splash cleanup helps when Barrel connects."),
+    ],
+    "sparky": [("reset", 6, "Sparky pressure is asking for a reset tool.")],
+    "threemusketeers": [
+        ("big_spell", 5, "Three Musketeers gets harder without heavy spell reach."),
+        ("swarm_clear", 2, "Extra splash helps when they split support."),
+    ],
+    "xbow": [
+        ("tank", 5, "A tankier body helps soak X-Bow locks."),
+        ("big_spell", 3, "Spell reach helps pressure X-Bow support."),
+    ],
+}
+
 STORAGE_DIR = Path(__file__).resolve().parent / "local_data"
 STORAGE_FILE = STORAGE_DIR / "profiles.json"
 MAX_HISTORY_ITEMS = 40
@@ -60,6 +159,26 @@ APP_BUILD_LABEL = os.getenv("APP_BUILD_LABEL", "local-dev")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip() or "http://127.0.0.1:11434"
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip() or "llama3.1:8b"
 CARD_ICON_CACHE_TTL_SECONDS = max(300, int(os.getenv("CARD_ICON_CACHE_TTL_SECONDS", "21600")))
+
+HERO_ICON_URL_VALIDITY_CACHE: dict[str, bool] = {}
+
+
+def resolve_hero_icon_url(hero_icon_url: str, base_icon_url: str) -> str:
+    hero_icon_url = str(hero_icon_url or "").strip()
+    if not hero_icon_url:
+        return ""
+
+    cached_valid = HERO_ICON_URL_VALIDITY_CACHE.get(hero_icon_url)
+    if cached_valid is None:
+        timeout = min(DEFAULT_TIMEOUT_SECONDS, 5.0)
+        try:
+            response = requests.head(hero_icon_url, timeout=timeout)
+            cached_valid = response.status_code == 200
+        except requests.RequestException:
+            cached_valid = False
+        HERO_ICON_URL_VALIDITY_CACHE[hero_icon_url] = cached_valid
+
+    return hero_icon_url if cached_valid else (base_icon_url or "")
 
 try:
     OLLAMA_TIMEOUT_SECONDS = max(5.0, float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "45")))
@@ -229,6 +348,11 @@ def normalized_card_level(level_value, max_level_value) -> int:
     return max(1, min(DISPLAY_LEVEL_CAP, level))
 
 
+def normalized_max_card_level(max_level_value) -> int:
+    """Convert Clash API max level into the in-game display cap."""
+    return normalized_card_level(max_level_value, max_level_value)
+
+
 def fetch_player_data(clean_tag: str, token: str) -> dict:
     """Call official Clash Royale API and return the raw player payload."""
     timeout = float(os.getenv("CR_API_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
@@ -307,10 +431,46 @@ def build_battle_log_analytics(raw_battles: list[dict], clean_tag: str) -> dict:
     my_archetypes: dict[str, dict] = {}
     opp_archetypes: dict[str, dict] = {}
     loss_archetype_counter: dict[str, int] = {}
+    my_card_stats: dict[str, dict] = {}
+    opp_card_stats: dict[str, dict] = {}
+    role_signals: dict[str, dict] = {}
 
     wins = losses = draws = 0
     crowns_for_total = crowns_against_total = 0
     heavy_losses = shutout_losses = 0
+    close_battles = 0
+
+    def add_card_result(target: dict[str, dict], card_names: list[str], result: str, crown_diff: int) -> None:
+        for name in card_names:
+            key = slug_key(name)
+            if not key:
+                continue
+            bucket = target.setdefault(
+                key,
+                {
+                    "key": key,
+                    "name": name,
+                    "count": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "draws": 0,
+                    "crownDiffTotal": 0,
+                },
+            )
+            bucket["count"] += 1
+            if result == "win":
+                bucket["wins"] += 1
+            elif result == "loss":
+                bucket["losses"] += 1
+            else:
+                bucket["draws"] += 1
+            bucket["crownDiffTotal"] += crown_diff
+
+    def add_role_signal(role: str, weight: int, reason: str) -> None:
+        bucket = role_signals.setdefault(role, {"role": role, "weight": 0, "reasons": []})
+        bucket["weight"] += int(weight or 0)
+        if reason and reason not in bucket["reasons"]:
+            bucket["reasons"].append(reason[:180])
 
     for battle in raw_battles:
         team = battle.get("team") if isinstance(battle.get("team"), list) else []
@@ -351,6 +511,9 @@ def build_battle_log_analytics(raw_battles: list[dict], clean_tag: str) -> dict:
 
         crowns_for_total += crowns_for
         crowns_against_total += crowns_against
+        crown_diff = crowns_for - crowns_against
+        if abs(crown_diff) <= 1:
+            close_battles += 1
 
         my_archetype = infer_battle_archetype(my_card_names)
         opp_archetype = infer_battle_archetype(opp_card_names)
@@ -367,12 +530,15 @@ def build_battle_log_analytics(raw_battles: list[dict], clean_tag: str) -> dict:
         opp_bucket = opp_archetypes.setdefault(opp_archetype, {"count": 0, "wins": 0, "losses": 0, "draws": 0})
         opp_bucket["count"] += 1
         if result == "win":
-            opp_bucket["losses"] += 1
-        elif result == "loss":
             opp_bucket["wins"] += 1
+        elif result == "loss":
+            opp_bucket["losses"] += 1
             loss_archetype_counter[opp_archetype] = int(loss_archetype_counter.get(opp_archetype) or 0) + 1
         else:
             opp_bucket["draws"] += 1
+
+        add_card_result(my_card_stats, my_card_names, result, crown_diff)
+        add_card_result(opp_card_stats, opp_card_names, result, crown_diff)
 
         if result == "loss":
             if (crowns_against - crowns_for) >= 2:
@@ -387,6 +553,7 @@ def build_battle_log_analytics(raw_battles: list[dict], clean_tag: str) -> dict:
                 "result": result,
                 "crownsFor": crowns_for,
                 "crownsAgainst": crowns_against,
+                "crownDiff": crown_diff,
                 "myArchetype": my_archetype,
                 "oppArchetype": opp_archetype,
                 "oppName": str(opp.get("name") or "Opponent"),
@@ -397,7 +564,47 @@ def build_battle_log_analytics(raw_battles: list[dict], clean_tag: str) -> dict:
     win_rate = round((wins * 100.0 / total), 1) if total else 0.0
     avg_crowns_for = round(crowns_for_total / total, 2) if total else 0.0
     avg_crowns_against = round(crowns_against_total / total, 2) if total else 0.0
+    avg_crown_diff = round((crowns_for_total - crowns_against_total) / total, 2) if total else 0.0
     recent_form = "".join({"win": "W", "loss": "L", "draw": "D"}.get(item.get("result"), "-") for item in analyzed[:10])
+    close_battle_rate = round((close_battles * 100.0 / total), 1) if total else 0.0
+    heavy_loss_rate = round((heavy_losses * 100.0 / losses), 1) if losses else 0.0
+    shutout_loss_rate = round((shutout_losses * 100.0 / losses), 1) if losses else 0.0
+
+    def win_rate_for_window(items: list[dict]) -> float:
+        sample_count = len(items)
+        if sample_count <= 0:
+            return 0.0
+        local_wins = len([item for item in items if item.get("result") == "win"])
+        return round((local_wins * 100.0 / sample_count), 1)
+
+    def current_streak_summary(items: list[dict]) -> dict:
+        if not items:
+            return {"type": "none", "count": 0, "label": "No streak"}
+
+        streak_type = str(items[0].get("result") or "draw")
+        count = 0
+        for item in items:
+            if str(item.get("result") or "") == streak_type:
+                count += 1
+            else:
+                break
+        short = {"win": "W", "loss": "L", "draw": "D"}.get(streak_type, "-")
+        return {
+            "type": streak_type,
+            "count": count,
+            "label": f"{short}{count}" if count > 0 else "No streak",
+        }
+
+    def longest_streak(items: list[dict], target: str) -> int:
+        best = 0
+        running = 0
+        for item in items:
+            if str(item.get("result") or "") == target:
+                running += 1
+                best = max(best, running)
+            else:
+                running = 0
+        return best
 
     def fold_archetypes(source: dict[str, dict]) -> list[dict]:
         rows: list[dict] = []
@@ -421,6 +628,33 @@ def build_battle_log_analytics(raw_battles: list[dict], clean_tag: str) -> dict:
         rows.sort(key=lambda item: (-item["count"], item["name"]))
         return rows[:8]
 
+    def fold_card_stats(source: dict[str, dict]) -> list[dict]:
+        rows: list[dict] = []
+        for bucket in source.values():
+            count = int(bucket.get("count") or 0)
+            if count <= 0:
+                continue
+            wins_local = int(bucket.get("wins") or 0)
+            losses_local = int(bucket.get("losses") or 0)
+            draws_local = int(bucket.get("draws") or 0)
+            crown_diff_total = int(bucket.get("crownDiffTotal") or 0)
+            rows.append(
+                {
+                    "key": str(bucket.get("key") or ""),
+                    "name": str(bucket.get("name") or "Unknown"),
+                    "count": count,
+                    "wins": wins_local,
+                    "losses": losses_local,
+                    "draws": draws_local,
+                    "winRate": round((wins_local * 100.0 / count), 1),
+                    "avgCrownDiff": round(crown_diff_total / count, 2),
+                    "seenRate": round((count * 100.0 / total), 1) if total else 0.0,
+                    "lossShare": round((losses_local * 100.0 / losses), 1) if losses else 0.0,
+                }
+            )
+        rows.sort(key=lambda item: (-item["count"], item["name"]))
+        return rows
+
     loss_patterns: list[dict] = []
     for name, count in sorted(loss_archetype_counter.items(), key=lambda item: (-item[1], item[0]))[:5]:
         share = round((count * 100.0 / losses), 1) if losses else 0.0
@@ -432,6 +666,160 @@ def build_battle_log_analytics(raw_battles: list[dict], clean_tag: str) -> dict:
     if shutout_losses > 0:
         share = round((shutout_losses * 100.0 / losses), 1) if losses else 0.0
         loss_patterns.append({"label": "Shutout losses (0 crowns)", "count": shutout_losses, "share": share})
+
+    opponent_rows = fold_archetypes(opp_archetypes)
+    my_card_rows = fold_card_stats(my_card_stats)
+    opponent_card_rows = fold_card_stats(opp_card_stats)
+
+    tough_matchups = sorted(
+        opponent_rows,
+        key=lambda item: (
+            item["count"] < 2,
+            item["winRate"],
+            -item["losses"],
+            -item["count"],
+            item["name"],
+        ),
+    )[:5]
+
+    top_threat_cards = sorted(
+        opponent_card_rows,
+        key=lambda item: (-item["losses"], -item["count"], item["winRate"], item["name"]),
+    )[:8]
+
+    for matchup in tough_matchups[:3]:
+        if int(matchup.get("losses") or 0) <= 0:
+            continue
+        for role, base_weight, guidance in ROLE_SIGNAL_ARCHETYPE_RULES.get(str(matchup.get("name") or ""), []):
+            add_role_signal(
+                role,
+                base_weight + min(3, int(matchup.get("losses") or 0)),
+                f"{matchup['name']} caused {matchup['losses']} losses in {matchup['count']} battles. {guidance}",
+            )
+
+    for threat in top_threat_cards[:6]:
+        if int(threat.get("losses") or 0) <= 0:
+            continue
+        for role, base_weight, guidance in ROLE_SIGNAL_CARD_RULES.get(str(threat.get("key") or ""), []):
+            add_role_signal(
+                role,
+                base_weight + min(2, int(threat.get("losses") or 0)),
+                f"{threat['name']} showed up in {threat['losses']} losses. {guidance}",
+            )
+
+    role_signal_rows = sorted(
+        (
+            {
+                "role": item["role"],
+                "weight": int(item["weight"] or 0),
+                "reasons": item["reasons"][:3],
+            }
+            for item in role_signals.values()
+            if int(item.get("weight") or 0) > 0
+        ),
+        key=lambda item: (-item["weight"], item["role"]),
+    )[:6]
+
+    current_streak = current_streak_summary(analyzed)
+    last_five_wr = win_rate_for_window(analyzed[:5])
+    last_ten_wr = win_rate_for_window(analyzed[:10])
+    best_win_streak = longest_streak(analyzed, "win")
+
+    headline = "No recent 1v1 battles were available to analyze."
+    subhead = "Load your profile and refresh after a few battles to unlock form and matchup reads."
+    if total:
+        if current_streak["type"] == "win" and current_streak["count"] >= 2:
+            headline = f"Positive form: {current_streak['label']} streak with {last_five_wr:.1f}% WR in your last 5."
+        elif current_streak["type"] == "loss" and current_streak["count"] >= 2:
+            headline = f"Recent slide: {current_streak['label']} streak with {last_five_wr:.1f}% WR in your last 5."
+        elif win_rate >= 55:
+            headline = f"Stable recent form at {win_rate:.1f}% WR across {total} recent 1v1 battles."
+        elif win_rate <= 45:
+            headline = f"Results are shaky at {win_rate:.1f}% WR across {total} recent 1v1 battles."
+        else:
+            headline = f"Results are close to even at {win_rate:.1f}% WR across {total} recent 1v1 battles."
+
+        toughest = tough_matchups[0] if tough_matchups else None
+        top_threat = top_threat_cards[0] if top_threat_cards else None
+        if toughest and int(toughest.get("losses") or 0) > 0:
+            subhead = (
+                f"Toughest matchup right now: {toughest['name']} "
+                f"({toughest['winRate']:.1f}% WR over {toughest['count']} battles)."
+            )
+        elif top_threat and int(top_threat.get("count") or 0) > 0:
+            subhead = (
+                f"Most repeated threat card: {top_threat['name']} "
+                f"seen in {top_threat['count']} battles."
+            )
+        else:
+            subhead = (
+                f"Recent form {recent_form or 'n/a'} with {avg_crown_diff:+.2f} average crown differential."
+            )
+
+    pressure_points: list[dict] = []
+    if total:
+        current_tone = "good" if last_five_wr >= 60 else "bad" if last_five_wr <= 40 else "warn"
+        pressure_points.append(
+            {
+                "tone": current_tone,
+                "title": "Current Form",
+                "detail": f"Last 5 WR {last_five_wr:.1f}% • current streak {current_streak['label']}",
+            }
+        )
+
+        if tough_matchups:
+            matchup = tough_matchups[0]
+            tone = "bad" if matchup["winRate"] <= 35 else "warn"
+            pressure_points.append(
+                {
+                    "tone": tone,
+                    "title": "Toughest Matchup",
+                    "detail": f"{matchup['name']} • {matchup['winRate']:.1f}% WR across {matchup['count']} battles",
+                }
+            )
+
+        if top_threat_cards:
+            threat = top_threat_cards[0]
+            tone = "bad" if threat["losses"] >= 3 else "warn"
+            pressure_points.append(
+                {
+                    "tone": tone,
+                    "title": "Recurring Threat",
+                    "detail": f"{threat['name']} appeared in {threat['count']} battles and {threat['losses']} losses",
+                }
+            )
+
+        if heavy_losses > 0:
+            tone = "bad" if heavy_loss_rate >= 45 else "warn"
+            pressure_points.append(
+                {
+                    "tone": tone,
+                    "title": "Loss Severity",
+                    "detail": f"{heavy_losses} losses were by 2+ crowns ({heavy_loss_rate:.1f}% of losses)",
+                }
+            )
+
+    recommendations: list[dict] = []
+    role_action_copy = {
+        "air_defense": "Tighten anti-air coverage",
+        "big_spell": "Upgrade your heavy spell pressure",
+        "building": "Add a sturdier building anchor",
+        "cycle": "Lighten your rotation",
+        "reset": "Bring a reset answer",
+        "spell": "Stabilize your spell package",
+        "swarm_clear": "Increase instant cleanup",
+        "tank": "Add a sturdier frontline body",
+    }
+    for signal in role_signal_rows[:3]:
+        reasons = signal.get("reasons") or []
+        recommendations.append(
+            {
+                "role": signal["role"],
+                "title": role_action_copy.get(signal["role"], "Refine matchup coverage"),
+                "detail": str(reasons[0] if reasons else "Recent losses suggest this role needs more support."),
+                "weight": signal["weight"],
+            }
+        )
 
     return {
         "playerTag": f"#{clean_tag}",
@@ -448,11 +836,29 @@ def build_battle_log_analytics(raw_battles: list[dict], clean_tag: str) -> dict:
             "winRate": win_rate,
             "avgCrownsFor": avg_crowns_for,
             "avgCrownsAgainst": avg_crowns_against,
+            "avgCrownDiff": avg_crown_diff,
+            "lastFiveWinRate": last_five_wr,
+            "lastTenWinRate": last_ten_wr,
+            "closeBattleRate": close_battle_rate,
+            "heavyLossRate": heavy_loss_rate,
+            "shutoutLossRate": shutout_loss_rate,
+            "currentStreak": current_streak,
+            "bestWinStreak": best_win_streak,
             "recentForm": recent_form,
         },
+        "overview": {
+            "headline": headline,
+            "subhead": subhead,
+        },
         "myArchetypes": fold_archetypes(my_archetypes),
-        "opponentArchetypes": fold_archetypes(opp_archetypes),
+        "opponentArchetypes": opponent_rows,
+        "toughMatchups": tough_matchups,
         "lossPatterns": loss_patterns[:6],
+        "pressurePoints": pressure_points[:4],
+        "roleSignals": role_signal_rows,
+        "recommendations": recommendations,
+        "topThreatCards": top_threat_cards,
+        "myCardStats": my_card_rows,
         "recentBattles": analyzed[:12],
     }
 
@@ -495,7 +901,7 @@ def fetch_card_catalog(token: str) -> list[dict]:
         icon_urls = item.get("iconUrls") or {}
         icon_url = str(icon_urls.get("medium") or "").strip()
         evolution_icon_url = str(icon_urls.get("evolutionMedium") or "").strip()
-        hero_icon_url = str(icon_urls.get("heroMedium") or "").strip()
+        hero_icon_url = resolve_hero_icon_url(icon_urls.get("heroMedium") or "", icon_url)
         if not name or not icon_url:
             continue
         icons.append(
@@ -532,8 +938,9 @@ def extract_and_sort_cards(payload: dict) -> list[dict]:
     extracted = []
 
     for card in cards:
-        level = normalized_card_level(card.get("level"), card.get("maxLevel"))
-        max_level = int(card.get("maxLevel") or 0)
+        raw_max_level = int(card.get("maxLevel") or 0)
+        level = normalized_card_level(card.get("level"), raw_max_level)
+        max_level = normalized_max_card_level(raw_max_level)
         count = int(card.get("count") or 0)
         evo_level = int(card.get("evolutionLevel") or 0)
 

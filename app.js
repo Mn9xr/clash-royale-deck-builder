@@ -33,9 +33,9 @@ const COACH_DATA_REFRESH_MAX_AGE_MS = 45 * 60 * 1000;
 const COACH_MIN_REFRESH_GAP_MS = 2 * 60 * 1000;
 const WEBSITE_OWNER_ALIAS = "Mn9xr";
 const CLASH_ROYALE_LIVE_FACTS = Object.freeze({
-  verifiedAt: "2026-03-11",
+  verifiedAt: "2026-03-17",
   summary:
-    "Official March Update 2026: Trophy Road now extends to 14,000 trophies and adds Arena 29, 30, 31, and 32 at 12,000, 12,500, 13,000, and 13,500 trophies. Heroes unlock starting at Arena 5."
+    "Official March Update 2026: Trophy Road now extends to 14,000 trophies and adds Arena 29, 30, 31, and 32 at 12,000, 12,500, 13,000, and 13,500 trophies. Heroes unlock starting at Arena 5. Mid-March deck slots are 1 Evo Slot, 1 Hero Slot, and 1 Wild Slot that can activate an Evolution, Hero, or Champion."
 });
 const CLASH_ROYALE_ARENA_NAMES = Object.freeze([
   "Arena 1: Goblin Stadium",
@@ -267,12 +267,19 @@ const elements = {
   actionUpgradeBtn: document.getElementById("actionUpgradeBtn"),
   avgElixir: document.getElementById("avgElixir"),
   battleAnalyticsStatus: document.getElementById("battleAnalyticsStatus"),
-  battleLossPatternsList: document.getElementById("battleLossPatternsList"),
   battleMyArchetypesList: document.getElementById("battleMyArchetypesList"),
+  battleOverviewHeadline: document.getElementById("battleOverviewHeadline"),
+  battleOverviewSubhead: document.getElementById("battleOverviewSubhead"),
+  battleSignalList: document.getElementById("battleSignalList"),
   battleSummaryCount: document.getElementById("battleSummaryCount"),
+  battleSummaryCrownDiff: document.getElementById("battleSummaryCrownDiff"),
   battleSummaryCrownsAgainst: document.getElementById("battleSummaryCrownsAgainst"),
   battleSummaryCrownsFor: document.getElementById("battleSummaryCrownsFor"),
+  battleSummaryLastFive: document.getElementById("battleSummaryLastFive"),
+  battleSummaryStreak: document.getElementById("battleSummaryStreak"),
   battleSummaryWinRate: document.getElementById("battleSummaryWinRate"),
+  battleThreatCardsList: document.getElementById("battleThreatCardsList"),
+  battleToughMatchupsList: document.getElementById("battleToughMatchupsList"),
   chatForm: document.getElementById("chatForm"),
   chatInput: document.getElementById("chatInput"),
   chatLog: document.getElementById("chatLog"),
@@ -281,10 +288,6 @@ const elements = {
   clearHistoryBtn: document.getElementById("clearHistoryBtn"),
   coachAnalyzeBtn: document.getElementById("coachAnalyzeBtn"),
   coachCardsBtn: document.getElementById("coachCardsBtn"),
-  comparisonOutput: document.getElementById("comparisonOutput"),
-  compareDeckA: document.getElementById("compareDeckA"),
-  compareDeckB: document.getElementById("compareDeckB"),
-  compareDeckBtn: document.getElementById("compareDeckBtn"),
   copySummaryBtn: document.getElementById("copySummaryBtn"),
   coverageList: document.getElementById("coverageList"),
   coverageScoreBadge: document.getElementById("coverageScoreBadge"),
@@ -297,7 +300,6 @@ const elements = {
   generateShareCardBtn: document.getElementById("generateShareCardBtn"),
   historyList: document.getElementById("historyList"),
   loadCollectionBtn: document.getElementById("loadCollectionBtn"),
-  loadProfileBtn: document.getElementById("loadProfileBtn"),
   minLevelInput: document.getElementById("minLevelInput"),
   ownedCardsCount: document.getElementById("ownedCardsCount"),
   ownedCardsGrid: document.getElementById("ownedCardsGrid"),
@@ -311,13 +313,13 @@ const elements = {
   playstyleSelect: document.getElementById("playstyleSelect"),
   randomDeckBtn: document.getElementById("randomDeckBtn"),
   refreshBattleAnalyticsBtn: document.getElementById("refreshBattleAnalyticsBtn"),
-  savedProfilesSelect: document.getElementById("savedProfilesSelect"),
-  saveProfileBtn: document.getElementById("saveProfileBtn"),
   searchInput: document.getElementById("searchInput"),
   shareCardOutput: document.getElementById("shareCardOutput"),
   specialSlotTracker: document.getElementById("specialSlotTracker"),
   statusMessage: document.getElementById("statusMessage"),
+  suggestionContext: document.getElementById("suggestionContext"),
   suggestionList: document.getElementById("suggestionList"),
+  suggestionNeedChips: document.getElementById("suggestionNeedChips"),
   catalogCount: document.getElementById("catalogCount"),
   catalogGrid: document.getElementById("catalogGrid"),
   catalogInsights: document.getElementById("catalogInsights"),
@@ -358,8 +360,6 @@ const state = {
   activeFilter: "all",
   collectionLoaded: false,
   coachRecommendations: [],
-  compareSelectionA: "current",
-  compareSelectionB: "rec-1",
   deck: [],
   evolutionLevels: new Map(),
   historyEntries: [],
@@ -376,7 +376,6 @@ const state = {
   pinnedDeck: null,
   playerProfile: null,
   playstylePreference: "no_preference",
-  savedProfiles: [],
   search: "",
   catalogQuickFilter: "all",
   catalogArtBySlug: new Map(),
@@ -605,6 +604,26 @@ function cardLevel(card) {
     return 0;
   }
   return state.ownedLevels.get(card.slug) ?? 0;
+}
+
+function normalizeOwnedCardLevel(levelValue, maxLevelValue) {
+  const level = Number(levelValue ?? 0);
+  const maxLevel = Number(maxLevelValue ?? 0);
+
+  if (!Number.isFinite(level) || level <= 0) {
+    return 0;
+  }
+
+  const safeLevel = Math.floor(level);
+  if (Number.isFinite(maxLevel) && maxLevel > 0 && maxLevel <= MAX_CARD_LEVEL) {
+    return Math.max(1, Math.min(MAX_CARD_LEVEL, safeLevel + (MAX_CARD_LEVEL - Math.floor(maxLevel))));
+  }
+
+  return Math.max(1, Math.min(MAX_CARD_LEVEL, safeLevel));
+}
+
+function cardMaxLevel(card) {
+  return normalizeOwnedCardLevel(card?.maxLevel ?? 0, card?.maxLevel ?? 0);
 }
 
 function cardEvolutionLevel(card) {
@@ -936,34 +955,6 @@ async function storageApiRequest(path, options = {}) {
   }
 }
 
-async function refreshSavedProfilesList() {
-  if (!elements.savedProfilesSelect) {
-    return;
-  }
-
-  try {
-    const payload = await storageApiRequest("/profiles", { method: "GET" });
-    const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
-    state.savedProfiles = profiles;
-
-    const current = elements.savedProfilesSelect.value;
-    const options = ['<option value="">Saved profiles...</option>'];
-
-    for (const item of profiles) {
-      const label = `${item.name || "Unknown"} (${item.tag || ""})`;
-      options.push(`<option value="${escapeHtml(String(item.tag || "").replace("#", ""))}">${escapeHtml(label)}</option>`);
-    }
-
-    elements.savedProfilesSelect.innerHTML = options.join("");
-
-    if (current) {
-      elements.savedProfilesSelect.value = current;
-    }
-  } catch (_error) {
-    // Silent fallback; local-first still works.
-  }
-}
-
 function rebuildOwnershipFromCards(cards) {
   const levels = new Map();
   const evolutionLevels = new Map();
@@ -987,112 +978,6 @@ function rebuildOwnershipFromCards(cards) {
   }
 
   return { levels, evolutionLevels };
-}
-
-function applySavedProfileRecord(record) {
-  const profile = record?.playerProfile;
-  const cards = Array.isArray(record?.cards) ? record.cards : [];
-
-  if (!profile || !cards.length) {
-    throw new Error("Saved profile is incomplete.");
-  }
-
-  const rebuilt = rebuildOwnershipFromCards(cards);
-  if (!rebuilt.levels.size) {
-    throw new Error("Saved cards could not be mapped to this dataset.");
-  }
-
-  state.playerProfile = profile;
-  state.collectionLoaded = true;
-  state.ownedCards = buildOwnedCardDisplayEntries(cards);
-  state.ownedLevels = rebuilt.levels;
-  state.evolutionLevels = rebuilt.evolutionLevels;
-  state.ownedOnly = true;
-  state.loadedPlayerName = String(profile?.name || "").trim();
-  state.loadedPlayerTag = String(profile?.tag || record?.playerTag || "").trim();
-  state.ownedCardsSearch = "";
-
-  if (elements.playerTagInput && state.loadedPlayerTag) {
-    elements.playerTagInput.value = state.loadedPlayerTag;
-  }
-
-  if (elements.ownedOnlyToggle) {
-    elements.ownedOnlyToggle.checked = true;
-  }
-
-  if (elements.ownedCardsSearchInput) {
-    elements.ownedCardsSearchInput.value = "";
-  }
-
-  state.playstylePreference = coercePlaystyle(record?.preferredPlaystyle || state.playstylePreference);
-  if (elements.playstyleSelect) {
-    elements.playstyleSelect.value = state.playstylePreference;
-  }
-  persistPlaystyleLocal();
-
-  if (record?.favoriteDeck && Array.isArray(record.favoriteDeck.cardIds)) {
-    state.pinnedDeck = record.favoriteDeck;
-    persistPinnedDeckLocal();
-  }
-
-  if (Array.isArray(record?.history)) {
-    state.historyEntries = record.history.slice(0, MAX_HISTORY_ITEMS);
-    persistHistoryLocal();
-  }
-
-  pruneDeckForCollection();
-  renderAll();
-  renderPinnedDeck();
-  renderHistory();
-  setStatus("Saved profile loaded.", "info");
-}
-
-async function saveCurrentProfile() {
-  if (!state.collectionLoaded || !state.playerProfile) {
-    setStatus("Load a collection before saving a profile.", "warn");
-    return;
-  }
-
-  const cleanTag = currentCleanTag();
-  if (!cleanTag) {
-    setStatus("Player tag is missing.", "warn");
-    return;
-  }
-
-  const payload = {
-    playerProfile: state.playerProfile,
-    cards: state.ownedCards,
-    favoriteDeck: state.pinnedDeck,
-    preferredPlaystyle: state.playstylePreference,
-    recentAnalysis: state.lastAnalysisText || null,
-    history: state.historyEntries.slice(0, MAX_HISTORY_ITEMS)
-  };
-
-  try {
-    await storageApiRequest(`/profile/${encodeURIComponent(cleanTag)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    setStatus("Profile saved locally.", "info");
-    addHistoryEntry("profile", "Profile saved", `${state.playerProfile.name || "Player"} (${state.loadedPlayerTag})`);
-    await refreshSavedProfilesList();
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : "Failed to save profile.";
-    setStatus(`Profile save failed: ${msg}`, "bad");
-  }
-}
-
-async function loadSavedProfileByTag(cleanTag) {
-  try {
-    const payload = await storageApiRequest(`/profile/${encodeURIComponent(cleanTag)}`, { method: "GET" });
-    applySavedProfileRecord(payload?.profile || null);
-    addHistoryEntry("profile", "Profile loaded", `Loaded #${cleanTag}`);
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : "Failed to load saved profile.";
-    setStatus(`Load failed: ${msg}`, "bad");
-  }
 }
 
 async function pushHistoryRemote(entry) {
@@ -1311,83 +1196,8 @@ function availableDeckSources() {
   return sources;
 }
 
-function renderComparisonSelectors() {
-  if (!elements.compareDeckA || !elements.compareDeckB) {
-    return;
-  }
-
-  const sources = availableDeckSources();
-  if (!sources.length) {
-    elements.compareDeckA.innerHTML = '<option value="">No deck available</option>';
-    elements.compareDeckB.innerHTML = '<option value="">No deck available</option>';
-    return;
-  }
-
-  const options = sources
-    .map((source) => `<option value="${escapeHtml(source.id)}">${escapeHtml(source.label)}</option>`)
-    .join("");
-
-  elements.compareDeckA.innerHTML = options;
-  elements.compareDeckB.innerHTML = options;
-
-  const hasA = sources.some((source) => source.id === state.compareSelectionA);
-  const hasB = sources.some((source) => source.id === state.compareSelectionB);
-
-  elements.compareDeckA.value = hasA ? state.compareSelectionA : sources[0].id;
-  elements.compareDeckB.value = hasB ? state.compareSelectionB : sources[Math.min(1, sources.length - 1)].id;
-}
-
 function deckSourceById(id) {
   return availableDeckSources().find((source) => source.id === id) || null;
-}
-
-function compareSelectedDecks() {
-  const leftId = elements.compareDeckA?.value || "";
-  const rightId = elements.compareDeckB?.value || "";
-  state.compareSelectionA = leftId;
-  state.compareSelectionB = rightId;
-
-  const left = deckSourceById(leftId);
-  const right = deckSourceById(rightId);
-
-  if (!left || !right) {
-    if (elements.comparisonOutput) {
-      elements.comparisonOutput.textContent = "Choose two valid decks first.";
-    }
-    return;
-  }
-
-  const leftMetrics = calculateMetrics(left.cards);
-  const rightMetrics = calculateMetrics(right.cards);
-  const leftScore = computeDeckScoreBreakdown(left.cards);
-  const rightScore = computeDeckScoreBreakdown(right.cards);
-
-  const lines = [];
-  lines.push(`Comparing: ${left.label} vs ${right.label}`);
-  lines.push("");
-  lines.push(compareScoreRow("Overall", leftScore.overall, rightScore.overall));
-  lines.push(compareScoreRow("Synergy", leftScore.synergy, rightScore.synergy));
-  lines.push(compareScoreRow("Defense", leftScore.defense, rightScore.defense));
-  lines.push(compareScoreRow("Anti-Air", leftScore.antiAir, rightScore.antiAir));
-  lines.push(compareScoreRow("Spell Balance", leftScore.spellBalance, rightScore.spellBalance));
-  lines.push(compareScoreRow("Cycle", leftScore.cycleSmoothness, rightScore.cycleSmoothness));
-  lines.push(compareScoreRow("Ladder Practicality", leftScore.ladderPracticality, rightScore.ladderPracticality));
-  lines.push("");
-
-  const saferDeck = rightScore.defense + rightScore.ladderPracticality >= leftScore.defense + leftScore.ladderPracticality ? right.label : left.label;
-  const aggressiveDeck = rightMetrics.avgElixir >= leftMetrics.avgElixir ? right.label : left.label;
-
-  lines.push(`What improved: ${rightScore.overall >= leftScore.overall ? right.label : left.label} is structurally cleaner.`);
-  lines.push(`What got weaker: ${rightScore.antiAir < leftScore.antiAir ? right.label : left.label} has thinner anti-air coverage.`);
-  lines.push(`Safer choice: ${saferDeck}.`);
-  lines.push(`More aggressive choice: ${aggressiveDeck}.`);
-  lines.push(`Recommendation: ${rightScore.overall > leftScore.overall ? right.label : left.label} gives a better ladder floor right now.`);
-
-  if (elements.comparisonOutput) {
-    elements.comparisonOutput.textContent = lines.join("\n");
-  }
-
-  addHistoryEntry("compare", "Deck comparison", `${left.label} vs ${right.label}`);
 }
 
 function buildUpgradeBuckets(cards) {
@@ -2344,7 +2154,106 @@ function renderCoverage(metrics) {
   renderCoverageHeader(entries, metrics);
 }
 
-function buildSuggestionNeedWeights(cards, metrics) {
+function getBattleAnalyticsPayload() {
+  return state.battleAnalytics.data && typeof state.battleAnalytics.data === "object"
+    ? state.battleAnalytics.data
+    : null;
+}
+
+function buildBattleSuggestionContext(payload = getBattleAnalyticsPayload()) {
+  const roleSignals = Array.isArray(payload?.roleSignals)
+    ? payload.roleSignals
+      .map((item) => ({
+        role: String(item?.role || "").trim(),
+        weight: Number(item?.weight || 0),
+        reasons: Array.isArray(item?.reasons)
+          ? item.reasons.map((reason) => String(reason || "").trim()).filter(Boolean)
+          : []
+      }))
+      .filter((item) => item.role && item.weight > 0)
+    : [];
+
+  const roleSignalMap = new Map(roleSignals.map((item) => [item.role, item]));
+  const cardStatsBySlug = new Map();
+
+  if (Array.isArray(payload?.myCardStats)) {
+    for (const entry of payload.myCardStats) {
+      const slug = String(entry?.slug || "").trim() || apiNameToSlug(entry?.name || "");
+      if (!slug) {
+        continue;
+      }
+
+      cardStatsBySlug.set(slug, {
+        count: Number(entry?.count || 0),
+        winRate: Number(entry?.winRate || 0),
+        avgCrownDiff: Number(entry?.avgCrownDiff || 0)
+      });
+    }
+  }
+
+  return {
+    payload,
+    roleSignals,
+    roleSignalMap,
+    cardStatsBySlug,
+    baselinePressureScore: 0
+  };
+}
+
+function formatSignedMetric(value, digits = 2) {
+  const numeric = Number(value || 0);
+  const sign = numeric > 0 ? "+" : "";
+  return `${sign}${numeric.toFixed(digits)}`;
+}
+
+function deckCoverageScoreForRole(cards, metrics, role) {
+  switch (role) {
+    case "air_defense":
+      return metrics.airDefense >= 2 ? 1 : metrics.airDefense === 1 ? 0.45 : 0;
+    case "big_spell":
+      return countDeckRole(cards, "big_spell") >= 1 ? 1 : 0;
+    case "building":
+      return metrics.buildings >= 1 ? 1 : 0;
+    case "cycle":
+      return metrics.cycleCards >= 2 || metrics.avgElixir <= 4 ? 1 : metrics.cycleCards === 1 ? 0.45 : 0;
+    case "reset":
+      return countDeckRole(cards, "reset") >= 1 ? 1 : 0;
+    case "spell":
+      return metrics.spells >= 2 ? 1 : metrics.spells === 1 ? 0.55 : 0;
+    case "support":
+      return metrics.winConditions <= 2 ? 1 : 0.35;
+    case "swarm_clear":
+      return countDeckRole(cards, "swarm_clear") >= 2 || metrics.spells >= 2
+        ? 1
+        : countDeckRole(cards, "swarm_clear") >= 1 || metrics.spells >= 1
+          ? 0.55
+          : 0;
+    case "tank":
+      return countDeckRole(cards, "tank") >= 1 ? 1 : 0;
+    case "win_condition":
+      return metrics.winConditions >= 1 ? 1 : 0;
+    default:
+      return countDeckRole(cards, role) >= 1 ? 1 : 0;
+  }
+}
+
+function computeBattlePressureFit(cards, battleContext) {
+  if (!battleContext?.payload || !battleContext.roleSignals.length) {
+    return 0;
+  }
+
+  const metrics = calculateMetrics(cards);
+  let score = 0;
+
+  for (const signal of battleContext.roleSignals) {
+    const coverage = deckCoverageScoreForRole(cards, metrics, signal.role);
+    score += (coverage - 0.45) * signal.weight;
+  }
+
+  return score;
+}
+
+function buildSuggestionNeedWeights(cards, metrics, battleContext) {
   const weights = new Map();
   const addNeed = (role, value) => {
     weights.set(role, (weights.get(role) || 0) + value);
@@ -2384,6 +2293,28 @@ function buildSuggestionNeedWeights(cards, metrics) {
   }
   if (metrics.avgElixir < 2.8 && metrics.size >= 5) {
     addNeed("tank", 8);
+  }
+
+  if (battleContext?.roleSignals.length) {
+    for (const signal of battleContext.roleSignals.slice(0, 5)) {
+      const coverage = deckCoverageScoreForRole(cards, metrics, signal.role);
+      const multiplier = coverage >= 0.95 ? 0.16 : coverage >= 0.55 ? 0.42 : 0.82;
+      const weightedNeed = Math.round(signal.weight * multiplier);
+      if (weightedNeed >= 2) {
+        addNeed(signal.role, weightedNeed);
+      }
+    }
+
+    const recentWr = Number(battleContext.payload?.summary?.lastFiveWinRate || 0);
+    const heavyLossRate = Number(battleContext.payload?.summary?.heavyLossRate || 0);
+
+    if (recentWr > 0 && recentWr < 45 && metrics.avgElixir > 4.2) {
+      addNeed("cycle", 4);
+    }
+
+    if (heavyLossRate >= 40 && metrics.buildings === 0) {
+      addNeed("building", 4);
+    }
   }
 
   if (!weights.size) {
@@ -2431,12 +2362,53 @@ function evaluateSuggestionNeeds(card, metrics, needWeights) {
   return { score, matched };
 }
 
-function evaluateBestSuggestionSwap(card, cards, baselineScore) {
+function evaluateBattleAwareCandidate(card, battleContext) {
+  if (!battleContext?.payload) {
+    return { score: 0, reasons: [], evidence: [] };
+  }
+
+  let score = 0;
+  const reasons = [];
+  const evidence = [];
+
+  for (const signal of battleContext.roleSignals.slice(0, 4)) {
+    const matchesSignal = card.roles.includes(signal.role) || (signal.role === "spell" && card.type === "Spell");
+    if (!matchesSignal) {
+      continue;
+    }
+
+    score += signal.weight * 0.55;
+    evidence.push(`Battle ${roleLabel(signal.role)}`);
+    if (signal.reasons[0]) {
+      reasons.push(signal.reasons[0]);
+    }
+  }
+
+  const history = battleContext.cardStatsBySlug.get(card.slug);
+  if (history && history.count >= 2) {
+    score += (history.winRate - 50) * 0.16;
+    score += history.avgCrownDiff * 1.4;
+
+    if (history.winRate >= 60) {
+      evidence.push(`${history.winRate.toFixed(0)}% WR`);
+      reasons.push(`${history.winRate.toFixed(0)}% WR in your recent battles when used.`);
+    }
+  }
+
+  return {
+    score,
+    reasons,
+    evidence
+  };
+}
+
+function evaluateBestSuggestionSwap(card, cards, baselineScore, battleContext) {
   if (!Array.isArray(cards) || cards.length !== DECK_SIZE || !baselineScore) {
     return null;
   }
 
   let best = null;
+  const baselinePressureScore = Number(battleContext?.baselinePressureScore || 0);
 
   for (let index = 0; index < cards.length; index += 1) {
     const existing = cards[index];
@@ -2449,19 +2421,23 @@ function evaluateBestSuggestionSwap(card, cards, baselineScore) {
     const next = computeDeckScoreBreakdown(candidateDeck);
 
     const gainOverall = Number(next.overall || 0) - Number(baselineScore.overall || 0);
+    const nextPressureScore = computeBattlePressureFit(candidateDeck, battleContext);
+    const battleGain = nextPressureScore - baselinePressureScore;
     const weightedGain =
       gainOverall +
       (Number(next.defense || 0) - Number(baselineScore.defense || 0)) * 0.25 +
       (Number(next.spellBalance || 0) - Number(baselineScore.spellBalance || 0)) * 0.22 +
       (Number(next.antiAir || 0) - Number(baselineScore.antiAir || 0)) * 0.18 +
       (Number(next.cycleSmoothness || 0) - Number(baselineScore.cycleSmoothness || 0)) * 0.16 +
-      (Number(next.ladderPracticality || 0) - Number(baselineScore.ladderPracticality || 0)) * 0.19;
+      (Number(next.ladderPracticality || 0) - Number(baselineScore.ladderPracticality || 0)) * 0.19 +
+      battleGain * 0.72;
 
     if (!best || weightedGain > best.weightedGain) {
       best = {
         swapIndex: index,
         swapCard: existing,
         gainOverall,
+        battleGain,
         weightedGain
       };
     }
@@ -2470,14 +2446,17 @@ function evaluateBestSuggestionSwap(card, cards, baselineScore) {
   return best;
 }
 
-function evaluateSuggestionCandidate(card, metrics, cards, needWeights, baselineScore) {
+function evaluateSuggestionCandidate(card, metrics, cards, needWeights, baselineScore, battleContext) {
   const fit = evaluateSuggestionNeeds(card, metrics, needWeights);
+  const battleFit = evaluateBattleAwareCandidate(card, battleContext);
   let score = fit.score;
   const reasons = [];
+  const evidence = [];
   let swap = null;
 
   if (fit.matched.length) {
     reasons.push(`Covers ${fit.matched.slice(0, 2).join(" + ")}`);
+    evidence.push(...fit.matched.slice(0, 2));
   }
 
   if (state.collectionLoaded) {
@@ -2485,46 +2464,106 @@ function evaluateSuggestionCandidate(card, metrics, cards, needWeights, baseline
     score += Math.min(lvl, MAX_CARD_LEVEL) * 0.9;
     if (lvl >= 14) {
       reasons.push(`High level L${lvl}`);
+      evidence.push(`L${lvl}`);
     }
   }
 
   if (card.variant === "evolution" && cardEvolutionLevel(card) > 0) {
     score += 2.4;
+    evidence.push("Evo Ready");
   } else if (card.variant === "hero") {
     score += 1.8;
+    evidence.push("Hero");
   } else if (card.variant === "base") {
     score += 0.7;
   }
 
+  score += battleFit.score;
+  reasons.push(...battleFit.reasons);
+  evidence.push(...battleFit.evidence);
+
   if (cards.length === DECK_SIZE) {
-    swap = evaluateBestSuggestionSwap(card, cards, baselineScore);
+    swap = evaluateBestSuggestionSwap(card, cards, baselineScore, battleContext);
     if (!swap) {
-      return { score: -999, reasons, swap: null };
+      return { score: -999, reasons, evidence, swap: null };
     }
     score += swap.weightedGain * 1.9;
 
     if (swap.gainOverall > 0) {
       reasons.unshift(`+${swap.gainOverall} deck score (swap ${swap.swapCard.name})`);
+      evidence.unshift(`+${swap.gainOverall} Score`);
     } else if (swap.gainOverall === 0) {
       reasons.unshift(`Sidegrade for ${swap.swapCard.name}`);
     }
+
+    if (swap.battleGain > 0.8) {
+      reasons.unshift(`Improves battle coverage by swapping ${swap.swapCard.name}.`);
+      evidence.unshift("Matchup Up");
+    }
   }
 
-  return { score, reasons, swap };
+  return {
+    score,
+    reasons: [...new Set(reasons)].slice(0, 4),
+    evidence: [...new Set(evidence)].slice(0, 4),
+    swap
+  };
+}
+
+function renderSuggestionContext(needWeights, battleContext) {
+  if (elements.suggestionContext) {
+    elements.suggestionContext.textContent = battleContext?.roleSignals.length
+      ? "Based on deck structure, recent battle pressure, and your usable levels."
+      : state.collectionLoaded
+        ? "Based on deck structure and your usable levels."
+        : "Based on the biggest role gaps in your current deck.";
+  }
+
+  if (!elements.suggestionNeedChips) {
+    return;
+  }
+
+  const needs = [...needWeights.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 4);
+
+  if (!needs.length) {
+    elements.suggestionNeedChips.innerHTML = "";
+    return;
+  }
+
+  elements.suggestionNeedChips.innerHTML = needs
+    .map(([role], index) => {
+      const battleDriven = Boolean(battleContext?.roleSignalMap?.has(role));
+      const prefix = index === 0 ? "Priority" : battleDriven ? "Battle" : "Need";
+      return `
+        <span class="suggestion-need-chip${battleDriven ? " battle" : ""}">
+          <span class="suggestion-need-prefix">${escapeHtml(prefix)}</span>
+          ${escapeHtml(roleLabel(role))}
+        </span>
+      `;
+    })
+    .join("");
 }
 
 function renderSuggestions(metrics) {
   const currentDeckCards = deckCards();
   const slugSet = deckSlugSet();
-  const needWeights = buildSuggestionNeedWeights(currentDeckCards, metrics);
+  const battleContext = buildBattleSuggestionContext();
+  const needWeights = buildSuggestionNeedWeights(currentDeckCards, metrics, battleContext);
   const baselineScore = currentDeckCards.length === DECK_SIZE ? computeDeckScoreBreakdown(currentDeckCards) : null;
+  battleContext.baselinePressureScore = currentDeckCards.length === DECK_SIZE
+    ? computeBattlePressureFit(currentDeckCards, battleContext)
+    : 0;
+  renderSuggestionContext(needWeights, battleContext);
+  const artBySlug = catalogCardArtBySlug();
 
   const suggestions = ENRICHED_CARDS
     .filter((card) => !slugSet.has(card.slug))
     .filter((card) => cardUsable(card))
     .map((card) => ({
       card,
-      ...evaluateSuggestionCandidate(card, metrics, currentDeckCards, needWeights, baselineScore)
+      ...evaluateSuggestionCandidate(card, metrics, currentDeckCards, needWeights, baselineScore, battleContext)
     }))
     .filter((entry) => entry.score > (currentDeckCards.length === DECK_SIZE ? 6 : 4))
     .sort(
@@ -2543,22 +2582,39 @@ function renderSuggestions(metrics) {
   if (!suggestions.length) {
     const empty = document.createElement("p");
     empty.className = "meta";
-    empty.textContent = state.collectionLoaded
-      ? "No usable suggestions at your current level filter."
-      : "Deck looks stable. Try swapping one card to iterate.";
+    empty.textContent = battleContext.roleSignals.length
+      ? "No usable cards match your biggest battle needs at the current level filter."
+      : state.collectionLoaded
+        ? "No usable suggestions at your current level filter."
+        : "Deck looks stable. Try swapping one card to iterate.";
     elements.suggestionList.appendChild(empty);
     return;
   }
 
-  for (const entry of suggestions) {
+  for (const [index, entry] of suggestions.entries()) {
     const card = entry.card;
     const canSwap = state.deck.length >= DECK_SIZE && Number.isInteger(entry.swap?.swapIndex) && entry.swap.swapIndex >= 0;
     const actionLabel = canSwap ? `Swap ${entry.swap.swapCard.name}` : "Add";
     const hintText = entry.reasons.length
       ? entry.reasons.slice(0, 2).join(" • ")
-      : "Best fit for your current structure.";
+      : battleContext.roleSignals.length
+        ? "Best fit for your recent battle pressure points."
+        : "Best fit for your current structure.";
+    const impactLabel = canSwap
+      ? entry.swap?.gainOverall > 0
+        ? `+${entry.swap.gainOverall} deck score`
+        : entry.swap?.battleGain > 0.8
+          ? "Better matchup coverage"
+          : "Low-risk sidegrade"
+      : battleContext.roleSignals.length
+        ? "Battle-aware add"
+        : "Structural add";
     const node = document.createElement("article");
     node.className = "suggestion-item motion-tilt";
+    const cardArtUrl = artBySlug.get(catalogArtKey(card.slug, card.variant)) || artBySlug.get(catalogArtKey(card.slug, "base")) || "";
+    const iconMarkup = cardArtUrl
+      ? `<span class="suggestion-card-icon"><img src="${escapeHtml(cardArtUrl)}" alt="${escapeHtml(card.name)}" loading="lazy" /></span>`
+      : `<span class="suggestion-card-icon fallback">${escapeHtml(card.name.charAt(0))}</span>`;
     let levelChip = "";
     if (state.collectionLoaded) {
       levelChip = `<span class="rarity-chip level">Lvl ${cardLevel(card)}</span>`;
@@ -2566,20 +2622,39 @@ function renderSuggestions(metrics) {
         levelChip += `<span class="rarity-chip level">Evo ${cardEvolutionLevel(card)}</span>`;
       }
     }
+    const evidenceHtml = entry.evidence.length
+      ? `<div class="suggestion-evidence-row">${entry.evidence
+        .slice(0, 4)
+        .map((label) => `<span class="suggestion-evidence">${escapeHtml(label)}</span>`)
+        .join("")}</div>`
+      : "";
     node.innerHTML = `
-      <h4>${card.name}</h4>
+      <div class="suggestion-head">
+        <div class="suggestion-card-title">
+          ${iconMarkup}
+          <div>
+            <h4>${card.name}</h4>
+            <p class="suggestion-subhead">${escapeHtml(card.type)} • ${escapeHtml(formatElixir(card))} elixir</p>
+          </div>
+        </div>
+        <span class="suggestion-rank">#${index + 1}</span>
+      </div>
       <div class="card-meta">
-        <span>${card.type}</span>
+        <span>${escapeHtml(PRETTY_VARIANT[card.variant] || "Card")}</span>
         <span class="elixir${card.variable_elixir ? " variable" : ""}">${formatElixir(card)}</span>
       </div>
       <div class="card-chips">${levelChip}</div>
+      ${evidenceHtml}
       <p class="suggestion-note">${escapeHtml(hintText)}</p>
-      <button
-        class="btn subtle"
-        data-add-card="${card.id}"
-        ${canSwap ? `data-swap-index="${entry.swap.swapIndex}"` : ""}
-        ${state.deck.length >= DECK_SIZE && !canSwap ? "disabled" : ""}
-      >${escapeHtml(actionLabel)}</button>
+      <div class="suggestion-footer">
+        <span class="suggestion-impact">${escapeHtml(impactLabel)}</span>
+        <button
+          class="btn subtle"
+          data-add-card="${card.id}"
+          ${canSwap ? `data-swap-index="${entry.swap.swapIndex}"` : ""}
+          ${state.deck.length >= DECK_SIZE && !canSwap ? "disabled" : ""}
+        >${escapeHtml(actionLabel)}</button>
+      </div>
     `;
     elements.suggestionList.appendChild(node);
   }
@@ -2600,6 +2675,33 @@ function renderBattleList(target, rows = [], emptyMessage) {
     .join("");
 }
 
+function renderBattleSignalList(target, rows = [], emptyMessage) {
+  if (!target) {
+    return;
+  }
+
+  if (!Array.isArray(rows) || !rows.length) {
+    target.innerHTML = `<li class="meta">${escapeHtml(emptyMessage)}</li>`;
+    return;
+  }
+
+  target.innerHTML = rows
+    .map((row) => {
+      const tone = String(row?.tone || "warn").trim().toLowerCase();
+      const title = escapeHtml(row?.title || "Signal");
+      const detail = escapeHtml(row?.detail || "");
+      return `
+        <li class="battle-signal-item ${tone}">
+          <div class="battle-signal-copy">
+            <strong>${title}</strong>
+            <span>${detail}</span>
+          </div>
+        </li>
+      `;
+    })
+    .join("");
+}
+
 function renderBattleAnalytics() {
   if (
     !elements.battleAnalyticsStatus ||
@@ -2614,56 +2716,87 @@ function renderBattleAnalytics() {
   const isLoaded = Boolean(state.collectionLoaded);
   const isLoading = Boolean(state.battleAnalytics.loading);
   const error = String(state.battleAnalytics.error || "");
-  const payload = state.battleAnalytics.data && typeof state.battleAnalytics.data === "object"
-    ? state.battleAnalytics.data
-    : null;
+  const payload = getBattleAnalyticsPayload();
+
+  const resetBattlePanels = (statusText, listMessage, overviewHeadline, overviewSubhead) => {
+    elements.battleAnalyticsStatus.textContent = statusText;
+    elements.battleOverviewHeadline.textContent = overviewHeadline;
+    elements.battleOverviewSubhead.textContent = overviewSubhead;
+    renderBattleSignalList(elements.battleSignalList, [], listMessage);
+    renderBattleList(elements.battleMyArchetypesList, [], listMessage);
+    renderBattleList(elements.battleToughMatchupsList, [], listMessage);
+    renderBattleList(elements.battleThreatCardsList, [], listMessage);
+  };
 
   elements.battleSummaryCount.textContent = "0";
   elements.battleSummaryWinRate.textContent = "0%";
   elements.battleSummaryCrownsFor.textContent = "0.00";
   elements.battleSummaryCrownsAgainst.textContent = "0.00";
+  elements.battleSummaryCrownDiff.textContent = "0.00";
+  elements.battleSummaryLastFive.textContent = "0%";
+  elements.battleSummaryStreak.textContent = "--";
 
   if (!isLoaded) {
-    elements.battleAnalyticsStatus.textContent = "Load your collection to analyze recent battles.";
-    renderBattleList(elements.battleMyArchetypesList, [], "No battle data yet.");
-    renderBattleList(elements.battleLossPatternsList, [], "No battle data yet.");
+    resetBattlePanels(
+      "Load your collection to analyze recent battles.",
+      "No battle data yet.",
+      "No battle read yet.",
+      "Load recent battles to surface matchup pressure and trend signals."
+    );
     return;
   }
 
   if (isLoading) {
-    elements.battleAnalyticsStatus.textContent = "Loading recent battle log...";
-    renderBattleList(elements.battleMyArchetypesList, [], "Loading...");
-    renderBattleList(elements.battleLossPatternsList, [], "Loading...");
+    resetBattlePanels(
+      "Loading recent battle log...",
+      "Loading...",
+      "Building your latest battle read...",
+      "Crunching recent matchups, threat cards, and momentum."
+    );
     return;
   }
 
   if (error) {
-    elements.battleAnalyticsStatus.textContent = `Battle log analytics error: ${error}`;
-    renderBattleList(elements.battleMyArchetypesList, [], "No battle data yet.");
-    renderBattleList(elements.battleLossPatternsList, [], "No battle data yet.");
+    resetBattlePanels(
+      `Battle log analytics error: ${error}`,
+      "No battle data yet.",
+      "Battle analytics unavailable.",
+      "The latest battle log could not be analyzed."
+    );
     return;
   }
 
   if (!payload) {
-    elements.battleAnalyticsStatus.textContent = "Press refresh to analyze your recent 1v1 battles.";
-    renderBattleList(elements.battleMyArchetypesList, [], "No battle data yet.");
-    renderBattleList(elements.battleLossPatternsList, [], "No battle data yet.");
+    resetBattlePanels(
+      "Press refresh to analyze your recent 1v1 battles.",
+      "No battle data yet.",
+      "No battle read yet.",
+      "Refresh after a few matches to see matchup pressure and trend signals."
+    );
     return;
   }
 
   const summary = payload.summary || {};
   const meta = payload.meta || {};
+  const overview = payload.overview || {};
   const analyzedCount = Number(meta.analyzedCount || 0);
   const sourceCount = Number(meta.sourceCount || 0);
   const recentForm = String(summary.recentForm || "").trim();
+  const currentStreakLabel = String(summary.currentStreak?.label || "--").trim() || "--";
 
   elements.battleSummaryCount.textContent = String(analyzedCount);
   elements.battleSummaryWinRate.textContent = `${Number(summary.winRate || 0).toFixed(1)}%`;
   elements.battleSummaryCrownsFor.textContent = Number(summary.avgCrownsFor || 0).toFixed(2);
   elements.battleSummaryCrownsAgainst.textContent = Number(summary.avgCrownsAgainst || 0).toFixed(2);
+  elements.battleSummaryCrownDiff.textContent = formatSignedMetric(summary.avgCrownDiff || 0);
+  elements.battleSummaryLastFive.textContent = `${Number(summary.lastFiveWinRate || 0).toFixed(1)}%`;
+  elements.battleSummaryStreak.textContent = currentStreakLabel;
+  elements.battleOverviewHeadline.textContent = String(overview.headline || "No battle read yet.");
+  elements.battleOverviewSubhead.textContent = String(overview.subhead || "Refresh after a few matches to see clearer battle trends.");
 
   const generatedAt = payload.generatedAt ? formatRelativeTime(payload.generatedAt) : "unknown";
-  elements.battleAnalyticsStatus.textContent = `${analyzedCount}/${sourceCount} battles analyzed • Updated ${generatedAt}${recentForm ? ` • Form ${recentForm}` : ""}`;
+  const bestWinStreak = Number(summary.bestWinStreak || 0);
+  elements.battleAnalyticsStatus.textContent = `${analyzedCount}/${sourceCount} battles analyzed • Updated ${generatedAt}${recentForm ? ` • Form ${recentForm}` : ""}${bestWinStreak ? ` • Best W streak ${bestWinStreak}` : ""}`;
 
   const myArchetypeRows = (Array.isArray(payload.myArchetypes) ? payload.myArchetypes : [])
     .slice(0, 6)
@@ -2674,17 +2807,32 @@ function renderBattleAnalytics() {
       return `<strong>${name}</strong> • ${count} battles • ${wr}% WR`;
     });
 
-  const lossPatternRows = (Array.isArray(payload.lossPatterns) ? payload.lossPatterns : [])
+  const toughMatchupRows = (Array.isArray(payload.toughMatchups) ? payload.toughMatchups : [])
     .slice(0, 6)
     .map((item) => {
-      const label = escapeHtml(item.label || "Pattern");
+      const label = escapeHtml(item.name || "Matchup");
       const count = Number(item.count || 0);
-      const share = Number(item.share || 0).toFixed(1);
-      return `<strong>${label}</strong> • ${count} (${share}% of losses)`;
+      const wr = Number(item.winRate || 0).toFixed(1);
+      return `<strong>${label}</strong> • ${count} battles • ${wr}% WR`;
     });
 
+  const threatRows = (Array.isArray(payload.topThreatCards) ? payload.topThreatCards : [])
+    .slice(0, 6)
+    .map((item) => {
+      const name = escapeHtml(item.name || "Threat");
+      const count = Number(item.count || 0);
+      const lossesAgainst = Number(item.losses || 0);
+      return `<strong>${name}</strong> • ${count} seen • ${lossesAgainst} losses`;
+    });
+
+  renderBattleSignalList(
+    elements.battleSignalList,
+    Array.isArray(payload.pressurePoints) ? payload.pressurePoints : [],
+    "No pressure points yet."
+  );
   renderBattleList(elements.battleMyArchetypesList, myArchetypeRows, "No archetype trends yet.");
-  renderBattleList(elements.battleLossPatternsList, lossPatternRows, "No clear loss patterns yet.");
+  renderBattleList(elements.battleToughMatchupsList, toughMatchupRows, "No tough matchups detected yet.");
+  renderBattleList(elements.battleThreatCardsList, threatRows, "No repeated threat cards yet.");
 }
 
 function updateOwnedSummary() {
@@ -2811,7 +2959,7 @@ function renderOwnedCards() {
       const name = escapeHtml(card?.name || "Unknown");
       const iconUrl = String(card?.iconUrl || "").trim();
       const level = Number(card?.level ?? 0);
-      const maxLevel = Number(card?.maxLevel ?? 0);
+      const maxLevel = cardMaxLevel(card);
       const count = Number(card?.count ?? 0);
       const evolutionLevel = Number(card?.evolutionLevel ?? 0);
       const rarity = escapeHtml(card?.rarity || "Unknown");
@@ -3336,20 +3484,36 @@ function clearCollection() {
 }
 
 
-function preferredVariantCardForSlug(slug) {
+function preferredVariantCardForSlug(slug, options = {}) {
+  const existingCards = Array.isArray(options.existingCards) ? options.existingCards.filter(Boolean) : [];
+  const preferredVariants = Array.isArray(options.preferredVariants) && options.preferredVariants.length
+    ? options.preferredVariants
+    : ["base", "hero", "evolution"];
+  const preferredVariantRank = new Map(preferredVariants.map((variant, index) => [variant, index]));
   const candidates = ENRICHED_CARDS
     .filter((card) => card.slug === slug)
     .filter((card) => cardUsable(card))
     .sort((a, b) => {
-      const pref = { evolution: 0, base: 1, hero: 2 };
-      const byVariant = (pref[a.variant] ?? 99) - (pref[b.variant] ?? 99);
+      const aLegal = validateDeckSpecialCaps([...existingCards, a]).legal ? 0 : 1;
+      const bLegal = validateDeckSpecialCaps([...existingCards, b]).legal ? 0 : 1;
+      if (aLegal !== bLegal) {
+        return aLegal - bLegal;
+      }
+
+      const aSpecial = Number(isHeroOrChampionCard(a) || isEvolutionCard(a));
+      const bSpecial = Number(isHeroOrChampionCard(b) || isEvolutionCard(b));
+      if (aSpecial !== bSpecial) {
+        return aSpecial - bSpecial;
+      }
+
+      const byVariant = (preferredVariantRank.get(a.variant) ?? 99) - (preferredVariantRank.get(b.variant) ?? 99);
       if (byVariant !== 0) {
         return byVariant;
       }
       if (state.collectionLoaded) {
         return cardLevel(b) - cardLevel(a);
       }
-      return 0;
+      return a.name.localeCompare(b.name);
     });
 
   return candidates[0] || null;
@@ -3360,7 +3524,7 @@ function buildDeckFromTemplate(template) {
   const missing = [];
 
   for (const slug of template.slugs) {
-    const match = preferredVariantCardForSlug(slug);
+    const match = preferredVariantCardForSlug(slug, { existingCards: cards });
     if (match) {
       cards.push(match);
     } else {
@@ -4966,12 +5130,25 @@ function loadExplorerDeckToBuilder(deckId) {
     return;
   }
 
-  const resolvedCards = deck.cards
-    .map((rawCard) => {
-      const slug = rawCard?.slug || apiNameToSlug(rawCard?.name || "");
-      return slug ? preferredVariantCardForSlug(slug) : null;
-    })
-    .filter(Boolean);
+  const resolvedCards = [];
+  for (const rawCard of deck.cards) {
+    const exactId = String(rawCard?.id || "").trim();
+    const exactCard = exactId ? getCard(exactId) : null;
+    if (exactCard && cardUsable(exactCard) && validateDeckSpecialCaps([...resolvedCards, exactCard]).legal) {
+      resolvedCards.push(exactCard);
+      continue;
+    }
+
+    const slug = rawCard?.slug || apiNameToSlug(rawCard?.name || "");
+    const rawVariant = String(rawCard?.variant || "").trim().toLowerCase();
+    const preferredVariants = rawVariant ? [rawVariant, "base", "hero", "evolution"] : ["base", "hero", "evolution"];
+    const match = slug
+      ? preferredVariantCardForSlug(slug, { existingCards: resolvedCards, preferredVariants })
+      : null;
+    if (match) {
+      resolvedCards.push(match);
+    }
+  }
 
   if (resolvedCards.length < DECK_SIZE) {
     setStatus("Some cards from this explorer deck do not exist in your local dataset yet.", "warn");
@@ -5210,7 +5387,7 @@ function ownedCardsForCoachContext() {
       name: card.name,
       slug: card.slug || "",
       level: Number(card.level ?? 0),
-      maxLevel: Number(card.maxLevel ?? 0),
+      maxLevel: cardMaxLevel(card),
       count: Number(card.count ?? 0),
       evolutionLevel: Number(card.evolutionLevel ?? 0),
       variant: card.variant || "base",

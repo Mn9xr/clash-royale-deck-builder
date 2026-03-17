@@ -76,27 +76,41 @@
             <h3>My Collection</h3>
             <p id="ownedSummary" class="meta">Collection not loaded</p>
           </div>
-          <div class="collection-grid">
-            <input id="playerTagInput" class="collection-input" type="text" placeholder="#PLAYER_TAG" autocomplete="off" />
-            <button id="loadCollectionBtn" class="btn">Fetch My Cards</button>
-            <button id="clearCollectionBtn" class="btn ghost">Clear</button>
-          </div>
+        <div class="collection-grid">
+          <input id="playerTagInput" class="collection-input" type="text" placeholder="#PLAYER_TAG" autocomplete="off" />
+          <button id="loadCollectionBtn" class="btn">Fetch My Cards</button>
+          <button id="clearCollectionBtn" class="btn ghost">Clear</button>
+        </div>
 
-          <div class="collection-grid extra-grid">
-            <select id="playstyleSelect" class="collection-input" aria-label="Preferred playstyle">
-              <option value="no_preference">Playstyle: No Preference</option>
-              <option value="aggressive">Playstyle: Aggressive</option>
-              <option value="control">Playstyle: Control</option>
-              <option value="beatdown">Playstyle: Beatdown</option>
-              <option value="cycle">Playstyle: Cycle</option>
-              <option value="bait">Playstyle: Bait</option>
-            </select>
-          </div>
+        <div class="collection-grid extra-grid">
+          <label for="minLevelInput" class="collection-label">Min level</label>
+          <input
+            id="minLevelInput"
+            class="collection-input"
+            type="number"
+            min="1"
+            max="16"
+            step="1"
+            value="1"
+            aria-label="Minimum owned card level"
+          />
+        </div>
 
-          <label class="owned-only-row">
-            <input id="ownedOnlyToggle" type="checkbox" />
-            Show owned cards only
-          </label>
+        <div class="collection-grid extra-grid">
+          <select id="playstyleSelect" class="collection-input" aria-label="Preferred playstyle">
+            <option value="no_preference">Playstyle: No Preference</option>
+            <option value="aggressive">Playstyle: Aggressive</option>
+            <option value="control">Playstyle: Control</option>
+            <option value="beatdown">Playstyle: Beatdown</option>
+            <option value="cycle">Playstyle: Cycle</option>
+            <option value="bait">Playstyle: Bait</option>
+          </select>
+        </div>
+
+        <label class="owned-only-row">
+          <input id="ownedOnlyToggle" type="checkbox" />
+          Show owned cards only
+        </label>
           <p class="meta small-meta">Uses official Clash Royale API on secure backend routes only. Token stays server-side.</p>
         </div>
 
@@ -106,6 +120,26 @@
           </div>
           <div id="playerProfileContent" class="profile-grid">
             <p class="meta">No profile loaded</p>
+          </div>
+        </div>
+
+        <div class="owned-cards-box">
+          <div class="panel-head">
+            <div>
+              <h3>Owned Cards</h3>
+              <p id="ownedCardsCount" class="meta">0 cards</p>
+            </div>
+            <input
+              id="ownedCardsSearchInput"
+              class="collection-input"
+              type="search"
+              placeholder="Search owned cards..."
+              aria-label="Search owned cards"
+              autocomplete="off"
+            />
+          </div>
+          <div id="ownedCardsGrid" class="owned-cards-grid">
+            <p class="meta">Load a player tag to view owned cards.</p>
           </div>
         </div>
 
@@ -226,7 +260,7 @@
           </div>
           <p id="battleAnalyticsStatus" class="meta small-meta">Load your collection to analyze recent battles.</p>
 
-          <div class="insight-metrics-grid">
+          <div class="battle-metrics-grid">
             <article class="insight-metric-card motion-tilt">
               <span class="insight-kicker">Recent 1v1</span>
               <strong id="battleSummaryCount">0</strong>
@@ -243,19 +277,55 @@
               <span class="insight-kicker">Avg Crowns Against</span>
               <strong id="battleSummaryCrownsAgainst">0.00</strong>
             </article>
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Crown Diff</span>
+              <strong id="battleSummaryCrownDiff">0.00</strong>
+            </article>
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Last 5 WR</span>
+              <strong id="battleSummaryLastFive">0%</strong>
+            </article>
+            <article class="insight-metric-card motion-tilt">
+              <span class="insight-kicker">Current Streak</span>
+              <strong id="battleSummaryStreak">--</strong>
+            </article>
           </div>
 
-          <div class="coach-mini-grid">
-            <article class="coach-mini-card">
+          <div class="battle-overview-strip">
+            <article class="battle-overview-card motion-tilt">
+              <p class="insight-kicker battle-overview-kicker">Live Read</p>
+              <h4 id="battleOverviewHeadline">No battle read yet.</h4>
+              <p id="battleOverviewSubhead" class="meta">Load recent battles to surface matchup pressure and trend signals.</p>
+            </article>
+
+            <article class="battle-signals-card motion-tilt">
+              <div class="panel-head compact-head">
+                <h5>Pressure Points</h5>
+              </div>
+              <ul id="battleSignalList" class="battle-signal-list">
+                <li class="meta">No battle data yet.</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="battle-insight-grid">
+            <article class="coach-mini-card battle-insight-card">
               <h5>My Archetypes</h5>
               <ul id="battleMyArchetypesList">
                 <li class="meta">No battle data yet.</li>
               </ul>
             </article>
 
-            <article class="coach-mini-card">
-              <h5>Loss Patterns</h5>
-              <ul id="battleLossPatternsList">
+            <article class="coach-mini-card battle-insight-card">
+              <h5>Toughest Matchups</h5>
+              <ul id="battleToughMatchupsList">
+                <li class="meta">No battle data yet.</li>
+              </ul>
+            </article>
+
+            <article class="coach-mini-card battle-insight-card">
+              <h5>Threat Cards</h5>
+              <ul id="battleThreatCardsList">
                 <li class="meta">No battle data yet.</li>
               </ul>
             </article>
@@ -264,9 +334,12 @@
 
         <div class="suggestion-wrap">
           <div class="panel-head">
-            <h3>Smart Suggestions</h3>
-            <p class="meta">Based on missing roles</p>
+            <div>
+              <h3>Smart Suggestions</h3>
+              <p id="suggestionContext" class="meta">Based on deck structure and current levels.</p>
+            </div>
           </div>
+          <div id="suggestionNeedChips" class="suggestion-need-chips"></div>
           <div id="suggestionList" class="suggestion-list"></div>
         </div>
 

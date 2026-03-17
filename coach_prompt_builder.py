@@ -231,5 +231,6 @@ def build_clash_royale_prompt(player_context: dict, user_message: str) -> str:
             "Response Rules For This Request:",
             "- If this is a general Clash Royale question, answer directly without requiring collection data.",
             "- Only enforce owned-card restrictions when recommending specific deck/card changes.",
+            "- Current special-slot legality is 1 Evo Slot, 1 Hero Slot, and 1 Wild Slot that can hold one extra Evolution, Hero, or Champion.",
         ]
     )
